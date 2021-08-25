@@ -25,8 +25,11 @@ def get_arr_net(_model, arr, slist):
     arr = arr.numpy()
     
     _param_list = []
+    start_index = 0
     for shape in slist:
-        item = arr[0:nd.prod(list(shape))]
+        end_index = start_index + nd.prod(list(shape))
+        item = arr[start_index:end_index]
+        start_index = end_index
         item = item.reshape(shape)
         _param_list.append(item)
     
