@@ -87,7 +87,7 @@ def FLTrust(base_model, models, **kwargs):
         updated_model_list.append(model)
         ts_score_list.append(ts_score)
 
-    log.debug("FLTrust Score {}".format(ts_score_list))
+    log.info("FLTrust Score {}".format(ts_score_list))
         
     model = reduce(add_model, updated_model_list)
     model = scale_model(model, 1.0 / sum(ts_score_list))
