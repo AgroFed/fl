@@ -93,14 +93,6 @@ def grad_norm(model, p=2):
 
 def grad_cosine_similarity(model1, model2):
     cos_score=[]
-    for param1, param2 in zip(model1.parameters(), model2.parameters()):
-        if len(param1.shape) > 1:
-            cos_score.append(torch.nn.functional.cosine_similarity(param1, param2).mean().detach().numpy())
-
-    return sum(cos_score)/len(cos_score)
-
-def grad_cosine_similarity(model1, model2):
-    cos_score=[]
     params1 = model1.state_dict().copy()
     params2 = model2.state_dict().copy()
     with torch.no_grad():
