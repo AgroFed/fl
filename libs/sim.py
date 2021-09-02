@@ -1,24 +1,57 @@
-import copy
-import torch
+import copy, cmath, torch
 import numpy as nd
 from mxnet import nd as mnd
 
-def get_net_arr(model):
-    param_list = [param.data.numpy() for param in model.parameters()]
+def cosine_similarity(arr1, arr2):
+    cs = mnd.dot(mnd.array(arr1), mnd.array(arr2)) / (mnd.norm(mnd.array(arr1)) + 1e-9) / (mnd.norm(mnd.array(arr2)) + 1e-9)
+    return cs.asnumpy()[0]
 
-    arr = nd.array([[]])
-    slist = []
-    for index, item in enumerate(param_list):
-        slist.append(item.shape)
-        item = item.reshape((-1, 1))
-        if index == 0:
-            arr = item
-        else:
-            arr = nd.concatenate((arr, item), axis=0)
-
-    arr = nd.array(arr).squeeze()
+def cosine_coord_vector_adapter(b, m, coord, dot_bm, norm_m, sim_mg, g):
+    prev_m_coord = m[coord]
+    m[coord] = cosine_coord_vector(b, m, coord, dot_bm, norm_m)
     
-    return arr, slist
+    #if cosine_similarity(m, g) < sim_mg:
+    #sim_mg = cosine_similarity(m, g)
+    dot_bm = dot_bm - b[coord] * (prev_m_coord - m[coord])
+    norm_m = cmath.sqrt(norm_m**2 - prev_m_coord**2 + m[coord]**2)
+    #else:
+    #m[coord] = prev_m_coord
+    
+    return m, dot_bm, norm_m, sim_mg
+
+def cosine_coord_vector(b, m, coord, dot_bm=None, norm_m = None):
+    if dot_bm is None:
+        dot_bm = dot(b, m)
+    if norm_m is None:
+        norm_m = norm(m)
+
+    lhs = ((dot_bm / norm_m) ** 2)
+    
+    coeff_b_coord = b[coord]
+    coeff_m_coord = m[coord]
+
+    _dot_bm = dot_bm - (coeff_b_coord * coeff_m_coord)
+    _norm_m = norm_m**2 - (coeff_m_coord**2)
+    
+    deg_2 = lhs - (coeff_b_coord**2)
+    deg_1 = -2 * _dot_bm * coeff_b_coord
+    deg_0 = lhs * _norm_m - (_dot_bm**2)
+    
+    d = (deg_1**2) - (4*deg_2*deg_0)
+    d_sqrt = cmath.sqrt(d)
+    _denom = 2*deg_2
+    sol1 = ((-deg_1-d_sqrt)/(_denom)).real
+    sol2 = ((-deg_1+d_sqrt)/(_denom)).real
+
+    sol = sol1
+    if abs(sol2 - coeff_m_coord) > abs(sol1 - coeff_m_coord):
+        sol = sol2
+    
+    return sol
+
+def dot(arr1, arr2):
+    cs = mnd.dot(mnd.array(arr1), mnd.array(arr2))
+    return cs.asnumpy()[0]
 
 def get_arr_net(_model, arr, slist):
     arr = torch.from_numpy(arr).unsqueeze(1)
@@ -59,15 +92,32 @@ def get_mx_net_arr(model):
     arr = mnd.array(arr)
     return arr
 
-def grad_norm(model):
-    arr = get_mx_net_arr(model)
-    return mnd.norm(arr).asnumpy()[0]
+def get_net_arr(model):
+    param_list = [param.data.numpy() for param in model.parameters()]
+
+    arr = nd.array([[]])
+    slist = []
+    for index, item in enumerate(param_list):
+        slist.append(item.shape)
+        item = item.reshape((-1, 1))
+        if index == 0:
+            arr = item
+        else:
+            arr = nd.concatenate((arr, item), axis=0)
+
+    arr = nd.array(arr).squeeze()
+    
+    return arr, slist
 
 def grad_cosine_similarity(model1, model2):
     arr1 = get_mx_net_arr(model1)
     arr2 = get_mx_net_arr(model2)
     cs = mnd.dot(arr1, arr2) / (mnd.norm(arr1) + 1e-9) / (mnd.norm(arr2) + 1e-9)
     return cs.asnumpy()[0]
+
+def grad_norm(model):
+    arr = get_mx_net_arr(model)
+    return mnd.norm(arr).asnumpy()[0]
 
 def _grad_cosine_similarity(model1, model2):
     cos_score=[]
@@ -77,6 +127,9 @@ def _grad_cosine_similarity(model1, model2):
 
     print(cos_score)
     return sum(cos_score)/len(cos_score)
+
+def norm(arr):
+    return mnd.norm(mnd.array(arr)).asnumpy()[0]
 
 '''
 import torch

@@ -62,35 +62,39 @@ def FedAvg(base_model, models):
     return model
 
 def FLTrust(base_model, models, **kwargs):
-    # Base Model Norm
     base_update = kwargs["base_update"]
-    base_norm = sim.grad_norm(base_update)
+    base_norm = kwargs["base_norm"] if "base_norm" in kwargs else True
+
+    if base_norm:
+        # Base Model Norm
+        base_update_norm = sim.grad_norm(base_update)
     
     model_list = list(models.values())
     ts_score_list=[]
     updated_model_list = []
     for model in model_list:
         ts_score = round(sim.grad_cosine_similarity(base_update, model), 3)
+
         # Relu
         if ts_score < 0:
             ts_score = 0
-            
-        # Model Norm    
-        norm = sim.grad_norm(model)
-        ndiv = round(base_norm/norm, 3)
-        
-        '''
-        for param in model.parameters():
-            param = param*ts_score*ndiv
-        '''
-        model = scale_model(model, ts_score * ndiv)
-        updated_model_list.append(model)
         ts_score_list.append(ts_score)
+
+        if base_norm:
+            # Model Norm    
+            norm = sim.grad_norm(model)
+            ndiv = base_update_norm/norm
+            model = scale_model(model, ts_score * ndiv)
+        else:
+            model = scale_model(model, ts_score)
+
+        updated_model_list.append(model)
 
     log.info("FLTrust Score {}".format(ts_score_list))
         
     model = reduce(add_model, updated_model_list)
     model = scale_model(model, 1.0 / sum(ts_score_list))
+
     if base_model is not None:
         model = sub_model(base_model, model)
     return model
