@@ -6,36 +6,40 @@ def cosine_similarity(arr1, arr2):
     cs = mnd.dot(mnd.array(arr1), mnd.array(arr2)) / (mnd.norm(mnd.array(arr1)) + 1e-9) / (mnd.norm(mnd.array(arr2)) + 1e-9)
     return cs.asnumpy()[0]
 
-def cosine_coord_vector_adapter(b, m, coord, dot_bm, norm_m, sim_mg, g):
+def cosine_coord_vector_adapter(b, m, coord, dot_mb, norm_m, sim_mg, g, norm_g):
     prev_m_coord = m[coord]
-    m[coord] = cosine_coord_vector(b, m, coord, dot_bm, norm_m)
+    m[coord] = cosine_coord_vector(b, m, coord, dot_mb, norm_m)
     
-    #if cosine_similarity(m, g) < sim_mg:
-    #sim_mg = cosine_similarity(m, g)
-    dot_bm = dot_bm - b[coord] * (prev_m_coord - m[coord])
-    norm_m = cmath.sqrt(norm_m**2 - prev_m_coord**2 + m[coord]**2)
-    #else:
-    #m[coord] = prev_m_coord
-    
-    return m, dot_bm, norm_m, sim_mg
+    _dot_mg = (sim_mg * norm_m * norm_g) - (g[coord] * (prev_m_coord - m[coord]))
+    _norm_m = cmath.sqrt(norm_m**2 - (prev_m_coord**2) + (m[coord]**2))
+    _sim_mg = (_dot_mg / (_norm_m * norm_g)).real
 
-def cosine_coord_vector(b, m, coord, dot_bm=None, norm_m = None):
-    if dot_bm is None:
-        dot_bm = dot(b, m)
+    if _sim_mg < sim_mg:
+        sim_mg = _sim_mg
+        dot_mb = dot_mb - b[coord] * (prev_m_coord - m[coord])
+        norm_m = cmath.sqrt(norm_m**2 - prev_m_coord**2 + m[coord]**2)
+    else:
+        m[coord] = prev_m_coord
+    
+    return m, dot_mb, norm_m, sim_mg
+
+def cosine_coord_vector(b, m, coord, dot_mb=None, norm_m = None):
+    if dot_mb is None:
+        dot_mb = dot(b, m)
     if norm_m is None:
         norm_m = norm(m)
 
-    lhs = ((dot_bm / norm_m) ** 2)
+    lhs = ((dot_mb / norm_m) ** 2)
     
     coeff_b_coord = b[coord]
     coeff_m_coord = m[coord]
 
-    _dot_bm = dot_bm - (coeff_b_coord * coeff_m_coord)
+    _dot_mb = dot_mb - (coeff_m_coord * coeff_b_coord)
     _norm_m = norm_m**2 - (coeff_m_coord**2)
     
     deg_2 = lhs - (coeff_b_coord**2)
-    deg_1 = -2 * _dot_bm * coeff_b_coord
-    deg_0 = lhs * _norm_m - (_dot_bm**2)
+    deg_1 = -2 * _dot_mb * coeff_b_coord
+    deg_0 = lhs * _norm_m - (_dot_mb**2)
     
     d = (deg_1**2) - (4*deg_2*deg_0)
     d_sqrt = cmath.sqrt(d)

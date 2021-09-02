@@ -1,5 +1,4 @@
-import heapq
-import os, sys
+import copy, heapq, os, sys
 import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../")))
@@ -33,9 +32,15 @@ def model_poison_cosine_coord(base_model_update, good_model_update, poison_perce
     c_arr, clist = sim.get_net_arr(good_client_update)
     
     npd = c_arr - b_arr
-    p_arr = c_arr
+    p_arr = copy.deepcopy(c_arr)
+    
+    dot_mb = sim.dot(p_arr, b_arr)
+    norm_m = sim.norm(p_arr)
+    norm_g = sim.norm(c_arr)
+    sim_mg = sim.cosine_similarity(p_arr, c_arr)
+    
     for index in heapq.nlargest(int(len(npd) * poison_percent), range(len(npd)), npd.take):
-        p_arr[index] = sim.cosine_coord_vector(b_arr, p_arr, index)
+        p_arr, dot_mb, norm_m, sim_mg = sim.cosine_coord_vector_adapter(b_arr, p_arr, index, dot_mb, norm_m, sim_mg, c_arr, norm_g)
 
     poison_model_update = sim.get_arr_net(base_model_update, p_arr, blist)
     return poison_model_update

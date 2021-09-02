@@ -239,7 +239,7 @@ for _epoch in tqdm(range(fedargs.epochs)):
     if FLTrust_cosine_attack:
         global_model_update, _, _ = train_model(global_model, root_loader, fedargs, device)
         for client in mal_clients:
-            client_model_updates[clients[client]] = poison.model_poison_cosine_coord(global_model_update, client_model_updates[clients[client]], 0.001, client_model_updates[clients[client + 24]])
+            client_model_updates[clients[client]] = poison.model_poison_cosine_coord(global_model_update, client_model_updates[clients[client]], 1, client_model_updates[clients[client + 24]])
     
 print(time.time() - start_time)
 
