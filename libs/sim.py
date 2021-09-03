@@ -72,8 +72,11 @@ def get_arr_net(_model, arr, slist):
     
     params = _model.state_dict().copy()
     with torch.no_grad():
-        for index, name1 in enumerate(params):
-            params[name1] = torch.from_numpy(_param_list[index])
+        _index = 0
+        for name in params:
+            if "weight" in name or "bias" in name:
+                params[name] = torch.from_numpy(_param_list[_index])
+                _index = _index + 1
 
     model = copy.deepcopy(_model)
     model.load_state_dict(params, strict=False)
