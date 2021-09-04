@@ -26,44 +26,33 @@ def label_flip(data, source_label, target_label, poison_percent = 0.5):
 
     return tuple(data)
 
-def model_poison_cosine_coord(base_model_update, good_model_update, poison_percent):
-    b_arr, blist = sim.get_net_arr(base_model_update)
-    g_arr, glist = sim.get_net_arr(good_model_update)
+def model_poison_cosine_coord(base_model_update, poison_percent, client_model_update):
+    b_arr, b_list = sim.get_net_arr(base_model_update)
+    c_arr, c_list = sim.get_net_arr(client_model_update)
 
-    npd = g_arr - b_arr
-    p_arr = copy.deepcopy(g_arr)
+    npd = c_arr - b_arr
+    p_arr = copy.deepcopy(c_arr)
     
     dot_mb = sim.dot(p_arr, b_arr)
     norm_m = sim.norm(p_arr)
-    norm_g = sim.norm(g_arr)
-    sim_mg = sim.cosine_similarity(p_arr, g_arr)
+    norm_c = sim.norm(c_arr)
+    sim_mg = sim.cosine_similarity(p_arr, c_arr)
     
     for index in heapq.nlargest(int(len(npd) * poison_percent), range(len(npd)), npd.take):
-        p_arr, dot_mb, norm_m, sim_mg = sim.cosine_coord_vector_adapter(b_arr, p_arr, index, dot_mb, norm_m, sim_mg, g_arr, norm_g)
+        p_arr, dot_mb, norm_m, sim_mg = sim.cosine_coord_vector_adapter(b_arr, p_arr, index, dot_mb, norm_m, sim_mg, c_arr, norm_c)
 
-    poison_model_update = sim.get_arr_net(base_model_update, p_arr, blist)
-    return poison_model_update
+    return p_arr, c_list
+    #client_model_update = sim.get_arr_net(client_model_update, p_arr, c_list)
+    #return client_model_update
 
-def model_poison_cosine_imp(base_model_update, good_model_update, poison_percent, good_client_update):
-    b_arr, blist = sim.get_net_arr(base_model_update)
-    g_arr, glist = sim.get_net_arr(good_model_update)
-    c_arr, clist = sim.get_net_arr(good_client_update)
+def model_poison_cosine_imp(base_model_update, client_model_update, poison_percent):
+    b_arr, b_list = sim.get_net_arr(base_model_update)
+    c_arr, c_list = sim.get_net_arr(client_model_update)
     
     npd = c_arr - b_arr
-    p_arr = c_arr
+    p_arr = copy.deepcopy(c_arr)
     for index in heapq.nlargest(int(len(npd) * poison_percent), range(len(npd)), npd.take):
         p_arr[index] = p_arr[index] + (2* npd[index])
 
-    poison_model_update = sim.get_arr_net(base_model_update, p_arr, blist)
-    return poison_model_update
-
-def model_poison_cosine_rand(base_model_update, good_model_update):
-    b_arr, blist = sim.get_net_arr(base_model_update)
-    g_arr, glist = sim.get_net_arr(good_model_update)
-    
-    npd = g_arr - b_arr
-    np.random.shuffle(npd)
-    
-    p_arr = b_arr + npd
-    poison_model_update = sim.get_arr_net(base_model_update, p_arr, blist)
-    return poison_model_update
+    client_model_update = sim.get_arr_net(client_model_update, p_arr, c_list)
+    return client_model_update
