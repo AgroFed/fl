@@ -26,22 +26,29 @@ def label_flip(data, source_label, target_label, poison_percent = 0.5):
 
     return tuple(data)
 
-def model_poison_cosine_coord(base_model_update, poison_percent, client_model_update):
-    b_arr, b_list = sim.get_net_arr(base_model_update)
-    c_arr, c_list = sim.get_net_arr(client_model_update)
+def model_poison_cosine_coord(b_arr, cosargs, c_arr):
+    poison_percent = cosargs["poison_percent"] if "poison_percent" in cosargs else 1
+    scale_dot = cosargs["scale_dot"] if "scale_dot" in cosargs else 1
+    
+    #b_arr, b_list = sim.get_net_arr(base_model_update)
+    #c_arr, c_list = sim.get_net_arr(client_model_update)
 
     npd = c_arr - b_arr
     p_arr = copy.deepcopy(c_arr)
     
-    dot_mb = sim.dot(p_arr, b_arr)
+    dot_mb = scale_dot * sim.dot(p_arr, b_arr)
     norm_m = sim.norm(p_arr)
     norm_c = sim.norm(c_arr)
     sim_mg = sim.cosine_similarity(p_arr, c_arr)
     
+    kwargs = {"scale_norm": cosargs["scale_norm"]} if "scale_norm" in cosargs else {}
+    
     for index in heapq.nlargest(int(len(npd) * poison_percent), range(len(npd)), npd.take):
-        p_arr, dot_mb, norm_m, sim_mg = sim.cosine_coord_vector_adapter(b_arr, p_arr, index, dot_mb, norm_m, sim_mg, c_arr, norm_c)
+        p_arr, dot_mb, norm_m, sim_mg = sim.cosine_coord_vector_adapter(b_arr, p_arr, index, dot_mb, norm_m, sim_mg, c_arr, norm_c, **kwargs)
+        
+    params_changed = np.sum(p_arr == c_arr)
 
-    return p_arr, c_list
+    return p_arr, params_changed#, c_list
     #client_model_update = sim.get_arr_net(client_model_update, p_arr, c_list)
     #return client_model_update
 

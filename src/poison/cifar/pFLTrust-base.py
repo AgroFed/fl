@@ -1,13 +1,15 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[24]:
+# In[17]:
 
 
 #get_ipython().run_line_magic('load_ext', 'autoreload')
 #get_ipython().run_line_magic('autoreload', '2')
 
 import asyncio, copy, os, pickle, socket, sys, time
+from functools import partial
+from multiprocessing import Pool, Process
 from pathlib import Path
 from tqdm import tqdm
 
@@ -16,10 +18,10 @@ from torch import optim
 from torch.utils.tensorboard import SummaryWriter
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../../../")))
-from libs import fl, nn, agg, data, poison, log
+from libs import agg, data, fl, log, nn, poison, resnet, sim
 
 
-# In[25]:
+# In[18]:
 
 
 # Save Logs To File (info | debug | warning | error | critical) [optional]
@@ -28,13 +30,13 @@ log.init("info")
 #log.init("debug", "flkafka.log")
 
 
-# In[26]:
+# In[19]:
 
 
 class FedArgs():
     def __init__(self):
         self.num_clients = 50
-        self.epochs = 25
+        self.epochs = 50
         self.local_rounds = 1
         self.client_batch_size = 32
         self.test_batch_size = 128
@@ -43,12 +45,12 @@ class FedArgs():
         self.cuda = False
         self.seed = 1
         self.loop = asyncio.get_event_loop()
-        self.tb = SummaryWriter('../../../out/runs/federated/FedAvg/fm-sine-10', comment="Centralized Federated training")
+        self.tb = SummaryWriter('../../../out/runs/federated/FLTrust/cf-sine-100-dot-2', comment="Centralized Federated training")
 
 fedargs = FedArgs()
 
 
-# In[27]:
+# In[20]:
 
 
 use_cuda = fedargs.cuda and torch.cuda.is_available()
@@ -57,18 +59,18 @@ device = torch.device("cuda" if use_cuda else "cpu")
 kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
 
 
-# In[28]:
+# In[21]:
 
 
 host = socket.gethostname()
 clients = [host + "(" + str(client + 1) + ")" for client in range(fedargs.num_clients)]
 
 
-# In[29]:
+# In[22]:
 
 
-#Initialize Global and Client models
-global_model = nn.ModelMNIST()
+# Initialize Global and Client models
+global_model = resnet.ResNet18()
 client_models = {client: copy.deepcopy(global_model) for client in clients}
 
 # Function for training
@@ -83,28 +85,30 @@ def train_model(_model, train_loader, fedargs, device):
     return model_update, model, loss
 
 
-# In[30]:
+# In[23]:
 
 
 # Load MNIST Data to clients
-train_data, test_data = data.load_dataset("fmnist")
+train_data, test_data = data.load_dataset("cifar10")
 
 
-# In[31]:
+# In[24]:
 
 
 # For securing if the next cell execution is skipped
 FLTrust = None
 cosine_attack = None
+proxy_server = None
+sybil_attack = None
 
 
 # <h1>FLTrust: Skip section below for any other averaging than FLTrust.</h1>
 
-# In[32]:
+# In[25]:
 
 
 FLTrust = True
-root_ratio = 0.01
+root_ratio = 0.003
 train_data, root_data = torch.utils.data.random_split(train_data, [int(len(train_data) * (1-root_ratio)), 
                                                               int(len(train_data) * root_ratio)])
 root_loader = torch.utils.data.DataLoader(root_data, batch_size=fedargs.client_batch_size, shuffle=True, **kwargs)
@@ -112,7 +116,7 @@ root_loader = torch.utils.data.DataLoader(root_data, batch_size=fedargs.client_b
 
 # <h2>Resume</h2>
 
-# In[33]:
+# In[26]:
 
 
 clients_data = data.split_data(train_data, clients)
@@ -120,7 +124,7 @@ clients_data = data.split_data(train_data, clients)
 
 # <h1>Poison: Skip section(s) below to run normal, modify if required.</h1>
 
-# In[34]:
+# In[27]:
 
 
 mal_clients = [c for c in range(24)]
@@ -141,15 +145,37 @@ mal_clients = [c for c in range(24)]
 
 # <h2>Cosine Attack, Skip if not required</h2>
 
-# In[35]:
+# In[28]:
 
 
 cosine_attack = True
+cosargs = {"poison_percent": 1, "scale_dot": 2, "scale_norm": 100}
+
+
+# <h3>If using proxy server (for partial knowledge), Skip if not required</h3>
+
+# In[29]:
+
+
+#proxy_server = True
+#proxy_ratio = 0.5
+#proxy_data, root_data = torch.utils.data.random_split(root_data, [int(len(root_data) * (1-proxy_ratio)), 
+#                                                              int(len(root_data) * proxy_ratio)])
+#root_loader = torch.utils.data.DataLoader(root_data, batch_size=fedargs.client_batch_size, shuffle=True, **kwargs)
+#proxy_loader = torch.utils.data.DataLoader(proxy_data, batch_size=fedargs.client_batch_size, shuffle=True, **kwargs)
+
+
+# <h2>Sybil Attack, Skip if not required</h2>
+
+# In[38]:
+
+
+#sybil_attack = True
 
 
 # <h2>Resume</h2>
 
-# In[36]:
+# In[30]:
 
 
 client_train_loaders, _ = data.load_client_data(clients_data, fedargs.client_batch_size, None, **kwargs)
@@ -161,7 +187,7 @@ clients_info = {
     }
 
 
-# In[37]:
+# In[31]:
 
 
 def background(f):
@@ -175,7 +201,7 @@ def process(client, epoch, model, train_loader, fedargs, device):
     # Train
     model_update, model, loss = train_model(model, train_loader, fedargs, device)
 
-    #Plot and Log
+    # Plot and Log
     #for local_epoch, loss in enumerate(list(loss.values())):
     #    fedargs.tb.add_scalars("Training Loss/" + client, {str(epoch): loss}, str(local_epoch + 1))
 
@@ -184,12 +210,8 @@ def process(client, epoch, model, train_loader, fedargs, device):
     
     return model_update
 
-@background
-def model_poison_cosine_coord(global_model_update, client_model_update, poison_percent = 1):
-    return poison.model_poison_cosine_coord(global_model_update, client_model_update, poison_percent)
 
-
-# In[38]:
+# In[ ]:
 
 
 import time
@@ -209,7 +231,7 @@ for _epoch in tqdm(range(fedargs.epochs)):
                    "base_norm": True}
         
         # Average
-        global_model = fl.federated_avg(client_model_updates, global_model, agg.Rule.FedAvg, **avgargs)
+        global_model = fl.federated_avg(client_model_updates, global_model, agg.Rule.FLTrust, **avgargs)
         log.modeldebug(global_model, "Epoch {} of {} : Server Update".format(epoch, fedargs.epochs))
 
         # Test
@@ -237,21 +259,40 @@ for _epoch in tqdm(range(fedargs.epochs)):
     if FLTrust:
         global_model_update, _, _ = train_model(global_model, root_loader, fedargs, device)
     
+        # For Attacks related to FLTrust
+        base_model_update = global_model_update
+        if proxy_server:
+            base_model_update, _, _ = train_model(global_model, proxy_loader, fedargs, device)
+    
         # For cosine attack, Malicious Clients
         if cosine_attack:
-            p_tasks = [model_poison_cosine_coord(global_model_update, client_model_updates[clients[client]]) 
-                       for client in mal_clients]
+            b_arr, b_list = sim.get_net_arr(base_model_update)
 
-            try:
-                p_updates = fedargs.loop.run_until_complete(asyncio.gather(*p_tasks))
-            except KeyboardInterrupt as e:
-                print("Caught keyboard interrupt. Canceling tasks...")
-                p_tasks.cancel()
-                fedargs.loop.run_forever()
-                p_tasks.exception()
+            with Pool(len(mal_clients)) as p:
+                func = partial(poison.model_poison_cosine_coord, b_arr, cosargs)
+                p_models = p.map(func, [sim.get_net_arr(client_model_updates[clients[client]])[0]
+                                        for client in mal_clients])
+                p.close()
+                p.join()
 
-            for client, update in zip(mal_clients, p_updates):
-                client_model_updates[clients[client]] = update
-    
+
+            for client, (p_arr, _) in zip(mal_clients, p_models):
+                client_model_updates[clients[client]] = sim.get_arr_net(client_model_updates[clients[client]],
+                                                                        p_arr, b_list)
+                
+            #plot params changed for only one client
+            fedargs.tb.add_scalar("Params Changed for Cosine Attack/", p_models[0][1], epoch)
+
+        # For sybil attack, Malicious Clients
+        if sybil_attack:
+            for client in mal_clients:
+                client_model_updates[clients[client]] = base_model_update
+
 print(time.time() - start_time)
+
+
+# In[ ]:
+
+
+
 

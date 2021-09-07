@@ -74,7 +74,7 @@ def FLTrust(base_model, models, **kwargs):
     fl_score_list=[]
     updated_model_list = []
     for model in model_list:
-        ts_score = round(sim.grad_cosine_similarity(base_update, model), 3)
+        ts_score = sim.grad_cosine_similarity(base_update, model)
 
         # Relu
         if ts_score < 0:
@@ -93,7 +93,7 @@ def FLTrust(base_model, models, **kwargs):
 
         updated_model_list.append(model)
 
-    log.info("FLTrust Score {}".format(ts_score_list))
+    log.info("Cosine Score {}".format(ts_score_list))
     log.info("FLTrust Score {}".format(fl_score_list))
         
     model = reduce(add_model, updated_model_list)

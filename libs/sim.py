@@ -6,15 +6,17 @@ def cosine_similarity(arr1, arr2):
     cs = mnd.dot(mnd.array(arr1), mnd.array(arr2)) / (mnd.norm(mnd.array(arr1)) + 1e-9) / (mnd.norm(mnd.array(arr2)) + 1e-9)
     return cs.asnumpy()[0]
 
-def cosine_coord_vector_adapter(b, m, coord, dot_mb, norm_m, sim_mg, g, norm_g, scale = 100):
+def cosine_coord_vector_adapter(b, m, coord, dot_mb, norm_m, sim_mg, c, norm_c, **kwargs):
+    scale_norm = kwargs["scale_norm"] if "scale_norm" in kwargs else 10
+    
     prev_m_coord = m[coord]
     m[coord] = cosine_coord_vector(b, m, coord, dot_mb, norm_m)
     
-    _dot_mg = (sim_mg * norm_m * norm_g) - (g[coord] * (prev_m_coord - m[coord]))
+    _dot_mg = (sim_mg * norm_m * norm_c) - (c[coord] * (prev_m_coord - m[coord]))
     _norm_m = cmath.sqrt(norm_m**2 - prev_m_coord**2 + m[coord]**2)
-    _sim_mg = (_dot_mg / (_norm_m * norm_g)).real
+    _sim_mg = (_dot_mg / (_norm_m * norm_c)).real
 
-    if _sim_mg < sim_mg and _norm_m < (norm_g * scale) and _norm_m > (norm_g * (1 / scale)):
+    if _sim_mg < sim_mg and _norm_m < (norm_c * scale_norm) and _norm_m > (norm_c * (1 / scale_norm)):
         sim_mg = _sim_mg
         norm_m = _norm_m
         dot_mb = dot_mb - b[coord] * (prev_m_coord - m[coord])
