@@ -15,15 +15,17 @@ def cosine_coord_vector_adapter(b, m, coord, dot_mb, norm_m, sim_mg, c, norm_c, 
     _dot_mg = (sim_mg * norm_m * norm_c) - (c[coord] * (prev_m_coord - m[coord]))
     _norm_m = cmath.sqrt(norm_m**2 - prev_m_coord**2 + m[coord]**2)
     _sim_mg = (_dot_mg / (_norm_m * norm_c)).real
-
+    
+    updated = True
     if _sim_mg < sim_mg and _norm_m < (norm_c * scale_norm) and _norm_m > (norm_c * (1 / scale_norm)):
         sim_mg = _sim_mg
         norm_m = _norm_m
         dot_mb = dot_mb - b[coord] * (prev_m_coord - m[coord])
     else:
+        updated = False
         m[coord] = prev_m_coord
     
-    return m, dot_mb, norm_m, sim_mg
+    return m, dot_mb, norm_m, sim_mg, updated
 
 def cosine_coord_vector(b, m, coord, dot_mb=None, norm_m = None):
     if dot_mb is None:

@@ -43,9 +43,17 @@ def load_dataset(dataset):
     return train_data, test_data
 
 
+def random_split(data, ratio):
+    split_arr = [int(len(data) * (1-ratio)), int(len(data) * ratio)]
+    rem_data = len(data) - sum(split_arr)
+    if rem_data > 0:
+        split_arr[-1] = split_arr[-1] + rem_data
+        
+    return torch.utils.data.random_split(data, split_arr)
+
 def split_data(train_data, clients):
     split_arr = [int(len(train_data) / len(clients)) for _ in range(len(clients))]
-    rem_data = len(train_data) - (len(clients) * int(len(train_data) / len(clients)))
+    rem_data = len(train_data) - sum(split_arr)
     if rem_data > 0:
         split_arr[-1] = split_arr[-1] + rem_data
     
