@@ -49,14 +49,17 @@ def model_poison_cosine_coord(b_arr, cosargs, c_arr):
     p_arr = copy.deepcopy(c_arr)
     
     dot_mb = scale_dot * sim.dot(p_arr, b_arr)
-    norm_m = sim.norm(p_arr)
+    norm_b = sim.norm(b_arr)
     norm_c = sim.norm(c_arr)
-    sim_mg = sim.cosine_similarity(p_arr, c_arr)
+    #norm_m = sim.norm(p_arr)
+    norm_m = norm_c
+    #sim_mg = sim.cosine_similarity(p_arr, c_arr)
+    sim_mg = 1
     
     kwargs = {"scale_norm": cosargs["scale_norm"]} if "scale_norm" in cosargs else {}
     
     for index in heapq.nlargest(int(len(npd) * poison_percent), range(len(npd)), npd.take):
-        p_arr, dot_mb, norm_m, sim_mg, updated = sim.cosine_coord_vector_adapter(b_arr, p_arr, index, dot_mb, norm_m, sim_mg, c_arr, norm_c, **kwargs)
+        p_arr, dot_mb, norm_m, sim_mg, updated = sim.cosine_coord_vector_adapter(b_arr, p_arr, index, dot_mb, norm_m, sim_mg, c_arr, norm_c, norm_b, **kwargs)
         
     params_changed = len(npd) - np.sum(p_arr == c_arr)
 

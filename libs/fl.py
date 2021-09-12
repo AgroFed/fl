@@ -38,6 +38,8 @@ def federated_avg(models: Dict[Any, torch.nn.Module],
             model = agg.FLTrust(base_model, models, **kwargs)
         if rule is agg.Rule.TMean:
             model = agg.TMean(base_model, models, **kwargs)
+        if rule is agg.Rule.FLTC:
+            model = agg.FLTC(base_model, models, **kwargs)
     else:
         model = copy.deepcopy(list(models.values())[0])
     return model
