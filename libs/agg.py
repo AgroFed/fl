@@ -9,8 +9,9 @@ from libs import sim, log
 class Rule(enum.Enum):
     FedAvg = 0
     FLTrust = 1
-    TMean = 2
+    T_Mean = 2
     FLTC = 3
+    FLTC_Layer = 4
 
 def verify_model(base_model, model):
     params1 = base_model.state_dict().copy()
@@ -104,6 +105,121 @@ def FLTrust(base_model, models, **kwargs):
     return model
 
 def FLTC(base_model, models, **kwargs):
+    base_model_update = kwargs["base_model_update"]   
+    base_model_arr, b_list = sim.get_net_arr(base_model_update)
+
+    updated_model_list = []
+    cosine_dist = []
+    eucliden_dist = []
+    for model in list(models.values()):
+        model_arr, _ = sim.get_net_arr(model)
+        updated_model_list.append(model_arr)
+        cosine_dist.append(sim.cosine_similarity(base_model_arr, model_arr))
+        eucliden_dist.append(sim.eucliden_dist(base_model_arr, model_arr))
+
+    cosine_score = np.array(cosine_dist)
+    cosine_score[np.where(cosine_score < 0)] = 0
+    print("Cosine score", cosine_score)
+    #cosine_score = sim.min_max_norm(cosine_score)
+    eucliden_dist = np.array(eucliden_dist)
+
+    updated_model_tensors = torch.tensor(updated_model_list)
+    merged_updated_model_tensors = torch.stack([model for model in updated_model_tensors], 0)
+    merged_updated_model_arrs = torch.transpose(merged_updated_model_tensors, 0, 1).numpy()
+
+    client_scores = np.ones(len(models))
+    model_arr = np.zeros(len(base_model_arr))
+    
+    for index, (b_arr, m_arr) in enumerate(zip(base_model_arr, merged_updated_model_arrs)):
+        a_euc_score = (b_arr - m_arr) / eucliden_dist
+
+        sign_p = np.where(np.sign(a_euc_score) == 1)
+        sign_n = np.where(np.sign(a_euc_score) == -1)
+        trusted_components = sign_p if len(sign_p[0]) > len(sign_n[0]) else sign_n
+
+        euc_score  = a_euc_score[trusted_components]
+        if len(euc_score) > 1:
+            ts_score = sim.min_max_norm(euc_score)
+
+            client_score = np.zeros(len(models))
+            for _index, trusted_component in enumerate(trusted_components[0]):
+                client_score[trusted_component] = ts_score[_index]
+            client_scores = (client_scores + client_score) / 2
+
+            if index == 10:
+                print("m_arr", m_arr)                
+                print("a_euc", a_euc_score)
+                print("client_score", client_score)
+                
+            if sum(client_score) > 0:
+                model_arr[index] = sum((m_arr * client_score) / sum(client_score))
+
+    log.info("FLTC Score {}".format(client_scores))
+    
+    model = sim.get_arr_net(base_model_update, model_arr, b_list)
+    
+    if base_model is not None:
+        model = sub_model(base_model, model)
+    return model
+
+def FLTC_Layer(base_model, models, **kwargs):
+    base_model_update = kwargs["base_model_update"] 
+    base_model_arr, b_list = sim.get_net_arr(base_model_update)
+    
+    updated_model_list = []
+    normalized_model_list = []
+    for model in list(models.values()):
+        model_arr, _ = sim.get_net_arr(model)
+        updated_model_list.append(model_arr)
+        
+    updated_model_arrs = np.array(updated_model_list)    
+    updated_model_tensors = torch.tensor(updated_model_list)
+    merged_updated_model_tensors = torch.stack([model for model in updated_model_tensors], 0)
+    merged_updated_model_arrs = torch.transpose(merged_updated_model_tensors, 0, 1).numpy()
+
+    client_scores = np.ones(len(models))
+    model_arr = np.zeros(len(base_model_arr))
+    
+    start_index = 0
+    for shape in b_list:
+        end_index = start_index + np.prod(list(shape))
+        sub_base_arr = base_model_arr[start_index:end_index]
+        eucliden_dist = np.array([sim.eucliden_dist(sub_base_arr, model[start_index:end_index]) for model in updated_model_arrs])
+        
+        for index in range(start_index, end_index):
+            b_arr = base_model_arr[index]
+            arr = merged_updated_model_arrs[index]
+
+            euc_score = (b_arr - arr) / eucliden_dist
+
+            sign_p = np.where(np.sign(euc_score) == 1)
+            sign_n = np.where(np.sign(euc_score) == -1)
+            trusted_components = sign_p if len(sign_p[0]) > len(sign_n[0]) else sign_n
+
+            arr = arr[trusted_components]
+            euc_score  = euc_score[trusted_components]
+            if len(euc_score) > 1:
+                ts_score = sim.min_max_norm(euc_score)
+
+                client_score = np.zeros(len(models))
+                for _index, trusted_component in enumerate(trusted_components[0]):
+                    client_score[trusted_component] = ts_score[_index]
+                client_scores = (client_scores + client_score) / 2
+
+                if sum(ts_score) > 0:
+                    model_arr[index] = sum((arr * ts_score) / sum(ts_score))
+        
+        start_index = end_index
+
+    log.info("FLTC Score {}".format(client_scores))
+    
+    model = sim.get_arr_net(base_model_update, model_arr, b_list)
+    
+    if base_model is not None:
+        model = sub_model(base_model, model)
+    return model
+
+def _FLTC(base_model, models, **kwargs):
     base_model_update = kwargs["base_model_update"]
     base_model_update_norm = sim.grad_norm(base_model_update)
     base_model_arr, b_list = sim.get_net_arr(base_model_update)
@@ -120,61 +236,59 @@ def FLTC(base_model, models, **kwargs):
     updated_model_tensors = torch.tensor(updated_model_list)
     merged_updated_model_tensors = torch.sort(torch.stack([model for model in updated_model_tensors], 0), dim = 0)
     merged_updated_model_arrs = torch.transpose(merged_updated_model_tensors.values, 0, 1).numpy()
+    merged_updated_model_indices = torch.transpose(merged_updated_model_tensors.indices, 0, 1).numpy()
     
-    trimmed_updated_model_arrs = []
-    for index, arr in enumerate(merged_updated_model_arrs):
-        l_arr = arr[np.where(arr >= base_model_arr[index])]
-        s_arr = arr[np.where(arr < base_model_arr[index])]        
-        
-        if len(l_arr) > len(s_arr):
-            trimmed_updated_model_arrs.append(l_arr)
-        else:
-            trimmed_updated_model_arrs.append(s_arr)
+    bs_score = base_model_arr / base_model_update_norm
+    bs_theta = np.arccos(bs_score)
+    client_scores = np.ones(len(models))
 
-    print("tarr_0", trimmed_updated_model_arrs[0])            
-    ts_scores = [(arr / base_model_update_norm) for arr in trimmed_updated_model_arrs]
-    print("ts", ts_scores[0], sum(ts_scores[0]))
-    
-    #ReLU
-    sign_b = np.sign(base_model_arr)
     model_arr = np.zeros(len(base_model_arr))
-    for index, (ts_score, arr) in enumerate(zip(ts_scores, trimmed_updated_model_arrs)):
-        ts_score = sign_b[index] * ts_score
-        #ts_score[np.where(ts_score < 1)] = 0
-        if max(ts_score) - min(ts_score) > 0:
-            ts_score = ((ts_score - min(ts_score)) / (max(ts_score) - min(ts_score)))
-            model_arr[index] = sum((arr * ts_score) / sum(ts_score))
-        ts_scores[index] = ts_score
-
-        '''
-        ts_scores[index] = sign_b[index] * ts_score
-        sign_t = np.sign(ts_score)
-        sign_p = len(ts_score[np.where(sign_bt < 1)]
-        sign_n = len(ts_score[np.where(sign_bt < 1)]
-        if 1 in sign_t and -1 in sign_t:
-            sign_bt = sign_b[index] * sign_t
-            ts_score[np.where(sign_bt < 1)] = 0
-            ts_scores[index] = ts_score
-        '''
-    print("n_ts", sign_b[0], ts_scores[0], sum(ts_scores[0]))    
-        
-    #ts_scores = np.array([(ts_score / sum(ts_score)) for ts_score in ts_scores])
-    #ts_scores = np.array([((ts_score - min(ts_score)) / (max(ts_score) - min(ts_score))) for ts_score in ts_scores if (max(ts_score) - min(ts_score)) > 0 else ts_score])
-
-    #print("n_ts", ts_scores[0], sum(ts_scores[0]))
-    #print("arr * ts", trimmed_updated_model_arrs[0] * ts_scores[0])
-    #print("arr * ts / sts", (trimmed_updated_model_arrs[0] * ts_scores[0]) / sum(ts_scores[0]))
-
-    #model_arr = np.array([sum((arr * ts) / sum(ts)) for arr, ts in zip(trimmed_updated_model_arrs, ts_scores)])
-    print("arr * ts / sts", (model_arr[0]))
     
+    for index, arr in enumerate(merged_updated_model_arrs):
+        l_indices = np.where(arr >= base_model_arr[index])
+        l_arr = arr[l_indices]
+        
+        s_indices = np.where(arr < base_model_arr[index])
+        s_arr = arr[s_indices]
+        
+        arr = s_arr
+        indices = s_indices
+        if len(l_arr) > len(s_arr):
+            arr = l_arr
+            indices = l_indices
+
+        ts_score = arr / base_model_update_norm
+        ts_theta = np.arccos(ts_score)
+        # wrt bs_theta
+        ts_theta = bs_theta[index] - ts_theta
+        ts_score = np.cos(ts_theta)
+
+        # Relu
+        #ts_score[np.where(ts_score < 0)] = 0
+        
+        # Sybils
+        #ts_score = sim.max_min_norm(ts_score)
+        
+ 
+        # Clients scores
+        client_score = np.zeros(len(models))
+        for _ind, ind in enumerate(merged_updated_model_indices[index][indices]):
+            client_score[ind] = ts_score[_ind]
+        client_scores = (client_scores + client_score) / 2
+
+        if sum(ts_score) > 0:
+            model_arr[index] = sum((arr * ts_score) / sum(ts_score))
+
+
+    print("Client_scores", client_scores)
+
     model = sim.get_arr_net(base_model_update, model_arr, b_list)
     
     if base_model is not None:
         model = sub_model(base_model, model)
     return model
 
-def TMean(base_model, models, **kwargs):
+def T_Mean(base_model, models, **kwargs):
     model_list = list(models.values())
     dummy_model = copy.deepcopy(model_list[0])
     dummy_dict = dummy_model.state_dict()

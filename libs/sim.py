@@ -61,6 +61,9 @@ def dot(arr1, arr2):
     cs = mnd.dot(mnd.array(arr1), mnd.array(arr2))
     return cs.asnumpy()[0]
 
+def eucliden_dist(arr1, arr2):
+    return sum((arr1 - arr2)**2)
+    
 def get_arr_net(_model, arr, slist):
     arr = torch.from_numpy(arr).unsqueeze(1)
     arr = arr.numpy()
@@ -130,14 +133,17 @@ def grad_norm(model):
     arr = get_mx_net_arr(model)
     return mnd.norm(arr).asnumpy()[0]
 
-def _grad_cosine_similarity(model1, model2):
-    cos_score=[]
-    for param1, param2 in zip(model1.parameters(), model2.parameters()):
-        if len(param1.shape) > 1:
-            cos_score.append(torch.nn.functional.cosine_similarity(param1, param2).mean().detach().numpy())
+def max_min_norm(arr):
+    if (max(arr) - min(arr)) != 0:
+        return (max(arr) - arr) / (max(arr) - min(arr))
+    else:
+        return arr
 
-    print(cos_score)
-    return sum(cos_score)/len(cos_score)
+def min_max_norm(arr):
+    if (max(arr) - min(arr)) != 0:
+        return (arr - min(arr)) / (max(arr) - min(arr))
+    else:
+        return arr
 
 def norm(arr):
     return mnd.norm(mnd.array(arr)).asnumpy()[0]
@@ -165,5 +171,14 @@ def grad_cosine_similarity(model1, model2):
                 if len(params1[name1].shape) > 1:
                     cos_score.append(torch.nn.functional.cosine_similarity(params1[name1], params2[name1]).mean())
 
+    return sum(cos_score)/len(cos_score)
+    
+def _grad_cosine_similarity(model1, model2):
+    cos_score=[]
+    for param1, param2 in zip(model1.parameters(), model2.parameters()):
+        if len(param1.shape) > 1:
+            cos_score.append(torch.nn.functional.cosine_similarity(param1, param2).mean().detach().numpy())
+
+    print(cos_score)
     return sum(cos_score)/len(cos_score)
 '''
