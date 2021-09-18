@@ -106,14 +106,21 @@ def FLTrust(base_model, models, **kwargs):
 
 def FLTC(base_model, models, **kwargs):
     base_model_update = kwargs["base_model_update"]   
+    base_model_update_norm = sim.grad_norm(base_model_update)
     base_model_arr, b_list = sim.get_net_arr(base_model_update)
 
-    updated_model_list = []
     cosine_dist = []
     eucliden_dist = []
+    normalized_model_list = []
+    updated_model_list = []
     for model in list(models.values()):
         model_arr, _ = sim.get_net_arr(model)
         updated_model_list.append(model_arr)
+        
+        norm = sim.grad_norm(model)
+        ndiv = base_model_update_norm / norm
+        normalized_model_list.append(model_arr * ndiv)
+           
         cosine_dist.append(sim.cosine_similarity(base_model_arr, model_arr))
         eucliden_dist.append(sim.eucliden_dist(base_model_arr, model_arr))
 
@@ -126,16 +133,26 @@ def FLTC(base_model, models, **kwargs):
     updated_model_tensors = torch.tensor(updated_model_list)
     merged_updated_model_tensors = torch.stack([model for model in updated_model_tensors], 0)
     merged_updated_model_arrs = torch.transpose(merged_updated_model_tensors, 0, 1).numpy()
+    
+    normalized_model_tensors = torch.tensor(normalized_model_list)
+    normalized_updated_model_tensors = torch.stack([model for model in normalized_model_tensors], 0)
+    normalized_updated_model_arrs = torch.transpose(normalized_updated_model_tensors, 0, 1).numpy()
 
     client_scores = np.ones(len(models))
     model_arr = np.zeros(len(base_model_arr))
     
-    for index, (b_arr, m_arr) in enumerate(zip(base_model_arr, merged_updated_model_arrs)):
+    for index, (b_arr, m_arr, n_arr) in enumerate(zip(base_model_arr, merged_updated_model_arrs, normalized_updated_model_arrs)):
         a_euc_score = (b_arr - m_arr) / eucliden_dist
 
+        l_indices = np.where(m_arr > b_arr)
+        s_indices = np.where(m_arr < b_arr)
+        trusted_components = l_indices if len(l_indices[0]) > len(s_indices[0]) else s_indices
+        
+        '''
         sign_p = np.where(np.sign(a_euc_score) == 1)
         sign_n = np.where(np.sign(a_euc_score) == -1)
         trusted_components = sign_p if len(sign_p[0]) > len(sign_n[0]) else sign_n
+        '''
 
         euc_score  = a_euc_score[trusted_components]
         if len(euc_score) > 1:
@@ -147,6 +164,8 @@ def FLTC(base_model, models, **kwargs):
             client_scores = (client_scores + client_score) / 2
 
             if index == 10:
+                print("b_arr", b_arr)                
+                print("n_arr", n_arr)               
                 print("m_arr", m_arr)                
                 print("a_euc", a_euc_score)
                 print("client_score", client_score)
