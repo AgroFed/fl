@@ -325,6 +325,7 @@ def _FLTC(base_model, models, **kwargs):
 
 def Krum(base_model, models, **kwargs):
     model_list = list(models.values())
+    model_keys = list(models.keys())
 
     beta = kwargs["beta"]
     lb = beta//2
@@ -341,7 +342,7 @@ def Krum(base_model, models, **kwargs):
         euclidean_dists.append(sq_dists)
     
     min_model_index = euclidean_dists.index(min(euclidean_dists)) 
-    log.info("Krum Candidate is {}".format(list(models.keys)[min_model_index]))
+    log.info("Krum Candidate is {}".format(model_keys[min_model_index]))
 
     model = model_list[min_model_index]
     if base_model is not None:
@@ -350,6 +351,7 @@ def Krum(base_model, models, **kwargs):
 
 def M_Krum(base_model, models, **kwargs):
     model_list = list(models.values())
+    model_keys = list(models.keys())
 
     beta = kwargs["beta"]
     lb = beta//2
@@ -365,8 +367,9 @@ def M_Krum(base_model, models, **kwargs):
         sq_dists = torch.sum(torch.sort(torch.tensor(model_dists)).values[lb:ub])
         euclidean_dists.append(sq_dists)
             
-    min_model_indices = np.argpartition(euclidean_dists, len(model_list) - 2*beta - 2)
-    log.info("M_Krum Candidates are {}".format(list(models.keys)[min_model_indices]))
+    min_model_indices = np.argpartition(np.array(euclidean_dists), len(model_list) - 2*beta - 2)
+    min_model_indices = min_model_indices[:len(model_list) - 2*beta - 2]
+    log.info("M_Krum Candidates are {}".format([model_keys[index] for index in min_model_indices]))
     
     model_list = [model for index, model in enumerate(model_list) if index in min_model_indices]
 

@@ -62,7 +62,8 @@ backdoor_attack = {"is": False,
 
 # Layer replacement attack
 layer_replacement_attack = {"is": False,
-                            "layers": ["conv1.weight"]}
+                            "layers": ["conv1.weight"],
+                            "func": poison.layer_replacement_attack}
 
 # Cosine attack
 cosine_attack = {"is": False,
@@ -71,7 +72,8 @@ cosine_attack = {"is": False,
                           "scale_dot_factor": 1,
                           "scale_norm": 500,
                           "scale_norm_factor": 2,
-                          "scale_epoch": 5}}
+                          "scale_epoch": 5},
+                 "func": poison.model_poison_cosine_coord}
 
 # Fang attack proposed for trimmed mean
 fang_attack = {"is": False,
