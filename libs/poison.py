@@ -1,15 +1,22 @@
-import copy, cv2, heapq, os, sys, torch
+import copy, cv2, enum, heapq, os, sys, torch
 from mxnet import nd as mnd
 import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../")))
 from libs import agg, fl, sim
 
-def fang_trmean(models, f):
+class Knowledge(enum.Enum):
+    FN = 0
+    PN = 1
+
+def fang_trmean(models, f, kn = Knowledge.PN):
     model_list = list(models.values())
     model_keys = list(models.keys())
     
     v = []
+    if kn is Knowledge.PN:
+        model_list = model_list[:f]
+
     for model in model_list:
         model_arr = sim.get_mx_net_arr(model)
         v.append(model_arr.reshape(-1, 1))
@@ -29,8 +36,8 @@ def fang_trmean(models, f):
     dummy_model = model_list[0]
     _, d_shape = sim.get_net_arr(dummy_model)
     
-    for index, params in enumerate(v):
-        models[model_keys[index]] = sim.get_arr_net(dummy_model, params.asnumpy(), d_shape)
+    for index in range(f):
+        models[model_keys[index]] = sim.get_arr_net(dummy_model, v[index].asnumpy(), d_shape)
     
     return models
 
@@ -137,7 +144,7 @@ def layer_replacement_attack(model_to_attack, model_to_reference, layers):
     model.load_state_dict(params1, strict=False)
     return model
 
-def lie_attack(models, n_attackers):
+def lie_attack(models, n_attackers, kn = Knowledge.PN):
     model_list = list(models.values())
     model_keys = list(models.keys())
     
@@ -145,11 +152,16 @@ def lie_attack(models, n_attackers):
     _, d_shape = sim.get_net_arr(dummy_model)
     
     v = []
-    for model in model_list[n_attackers:]:
+    if kn is Knowledge.PN:
+        model_list = model_list[:n_attackers]
+    elif kn is Knowledge.FN:
+        model_list = model_list[n_attackers:]
+        
+    for model in model_list:
         model_arr, _ = sim.get_net_arr(model)
         v.append(model_arr)
-    avg = np.array(v).mean(0)
 
+    avg = np.array(v).mean(0)
     std = torch.std(torch.tensor(v), 0)
 
     z_values={3:0.69847, 5:0.7054, 8:0.71904, 10:0.72575, 20:0.73891}
@@ -194,7 +206,7 @@ def model_poison_cosine_imp(base_model_update, client_model_update, poison_perce
     client_model_update = sim.get_arr_net(client_model_update, p_arr, c_list)
     return client_model_update
 
-def sota_agr_tailored_trmean(models, n_attackers, dev_type='unit_vec', agg_rule = agg.Rule.T_Mean, threshold=5.0, threshold_diff=1e-5):
+def sota_agr_tailored_trmean(models, n_attackers, kn = Knowledge.PN, dev_type='unit_vec', agg_rule = agg.Rule.T_Mean, threshold=5.0, threshold_diff=1e-5):
     model_list = list(models.values())
     model_keys = list(models.keys())
     
@@ -202,7 +214,12 @@ def sota_agr_tailored_trmean(models, n_attackers, dev_type='unit_vec', agg_rule 
     _, d_shape = sim.get_net_arr(dummy_model)
     
     v = []
-    for model in model_list[n_attackers:]:
+    if kn is Knowledge.PN:
+        model_list = model_list[:n_attackers]
+    elif kn is Knowledge.FN:
+        model_list = model_list[n_attackers:]
+
+    for model in model_list:
         model_arr, _ = sim.get_net_arr(model)
         v.append(model_arr)
     model_re = np.array(v).mean(0)
@@ -250,7 +267,7 @@ def sota_agr_tailored_trmean(models, n_attackers, dev_type='unit_vec', agg_rule 
     
     return models
 
-def sota_agnostic_min_max(models, n_attackers, dev_type='unit_vec'):
+def sota_agnostic_min_max(models, n_attackers, kn = Knowledge.PN, dev_type='unit_vec'):
     model_list = list(models.values())
     model_keys = list(models.keys())
     
@@ -258,7 +275,12 @@ def sota_agnostic_min_max(models, n_attackers, dev_type='unit_vec'):
     _, d_shape = sim.get_net_arr(dummy_model)
     
     v = []
-    for model in model_list[n_attackers:]:
+    if kn is Knowledge.PN:
+        model_list = model_list[:n_attackers]
+    elif kn is Knowledge.FN:
+        model_list = model_list[n_attackers:]
+
+    for model in model_list:
         model_arr, _ = sim.get_net_arr(model)
         v.append(model_arr)
     model_re = np.array(v).mean(0)
@@ -304,7 +326,7 @@ def sota_agnostic_min_max(models, n_attackers, dev_type='unit_vec'):
     
     return models
 
-def sota_agnostic_min_sum(models, n_attackers, dev_type='unit_vec'):
+def sota_agnostic_min_sum(models, n_attackers, kn = Knowledge.PN, dev_type='unit_vec'):
     model_list = list(models.values())
     model_keys = list(models.keys())
     
@@ -312,7 +334,12 @@ def sota_agnostic_min_sum(models, n_attackers, dev_type='unit_vec'):
     _, d_shape = sim.get_net_arr(dummy_model)
     
     v = []
-    for model in model_list[n_attackers:]:
+    if kn is Knowledge.PN:
+        model_list = model_list[:n_attackers]
+    elif kn is Knowledge.FN:
+        model_list = model_list[n_attackers:]
+
+    for model in model_list:
         model_arr, _ = sim.get_net_arr(model)
         v.append(model_arr)
     model_re = np.array(v).mean(0)

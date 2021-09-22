@@ -77,14 +77,17 @@ cosine_attack = {"is": False,
 
 # Fang attack proposed for trimmed mean
 fang_attack = {"is": False,
+               "kn": poison.Knowledge.PN,
                "func": poison.fang_trmean}
 
 # LIE attack
 lie_attack = {"is": False,
+              "kn": poison.Knowledge.PN,
               "func": poison.lie_attack}
 
 # SOTA attack proposed for trimmed mean, min-max, min-sum
 sota_attack = {"is": False,
+               "kn": poison.Knowledge.PN,
                "dev_type": "unit_vec", # see other possible functions in poison python file
                "func": poison.sota_agnostic_min_max # see other possible functions in poison python file
                }
