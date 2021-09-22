@@ -19,15 +19,15 @@ class FedArgs():
         self.seed = 1
         self.loop = asyncio.get_event_loop()
         self.agg_rule = agg.Rule.FedAvg
-        self.dataset = "mnist" #can run for fmnist, cifar-10
-        self.labels = [label for label in range(10)]
+        self.dataset = "mnist" # can run for mnist, f-mnist, cifar-10
+        self.labels = [label for label in range(10)] # for mnist and f-Mnist
         self.model = nn.ModelMNIST() # for mnist and f-mnist #resnet.ResNet18() for cifar - 10
-        self.tb = SummaryWriter(argsdir + '/../out/runs/federated/FedAvg/mn-lfa-next-e-50', comment="Centralized Federated training")
+        self.tb = SummaryWriter(argsdir + '/../out/runs/federated/FedAvg/mn-lfa-next-e-50', comment="Federated training")
         
 fedargs = FedArgs()
         
 # FLTrust
-FLTrust = {"is": False if fedargs.agg_rule in [agg.Rule.FLTrust, agg.Rule.FLTC] else False,
+FLTrust = {"is": True if fedargs.agg_rule in [agg.Rule.FLTrust, agg.Rule.FLTC] else False,
            "ratio": 0.003,
            "data": None,
            "loader": None,
@@ -40,16 +40,21 @@ FLTrust = {"is": False if fedargs.agg_rule in [agg.Rule.FLTrust, agg.Rule.FLTC] 
 mal_clients = [c for c in range(20)]
 
 # Label Flip
-label_flip_attack = {"is": True,
-                     "func": poison.label_flip_next,
+label_flip_attack = {"is": False,
+                     "func": poison.label_flip_next, # see other possible functions in poison python file
                      "labels": {},
                      "percent": -1}
-label_flip_attack["labels"] = {4: 6} if label_flip_attack["is"] and label_flip_attack["func"] is poison.label_flip else None
-label_flip_attack["labels"] = {label: fedargs.labels[(index + 1) % len(fedargs.labels)] for index, label in enumerate(fedargs.labels)} if label_flip_attack["is"] and label_flip_attack["func"] is poison.label_flip_next else label_flip_attack["labels"]
+
+def set_lfa_labels(flip_labels = None):
+    if flip_labels is None:
+        label_flip_attack["labels"] = {4: 6} if label_flip_attack["is"] and label_flip_attack["func"] is poison.label_flip else None
+        label_flip_attack["labels"] = {label: fedargs.labels[(index + 1) % len(fedargs.labels)] for index, label in enumerate(fedargs.labels)} if label_flip_attack["is"] and label_flip_attack["func"] is poison.label_flip_next else label_flip_attack["labels"]
+    else:
+        label_flip_attack["labels"] = flip_labels
 
 # Backdoor
 backdoor_attack = {"is": False,
-                   "trojan_func": poison.insert_trojan_pattern,
+                   "trojan_func": poison.insert_trojan_pattern, # see other possible functions in poison python file
                    "target_label": 6,
                    "ratio": 0.006,
                    "data": None,
@@ -67,6 +72,20 @@ cosine_attack = {"is": False,
                           "scale_norm": 500,
                           "scale_norm_factor": 2,
                           "scale_epoch": 5}}
+
+# Fang attack proposed for trimmed mean
+fang_attack = {"is": False,
+               "func": poison.fang_trmean}
+
+# LIE attack
+lie_attack = {"is": False,
+              "func": poison.lie_attack}
+
+# SOTA attack proposed for trimmed mean, min-max, min-sum
+sota_attack = {"is": False,
+               "dev_type": "unit_vec", # see other possible functions in poison python file
+               "func": poison.sota_agnostic_min_max # see other possible functions in poison python file
+               }
 
 # Sybil attack, for sending same update as base
 sybil_attack = {"is": False}

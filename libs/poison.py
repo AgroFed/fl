@@ -1,8 +1,38 @@
 import copy, cv2, heapq, os, sys, torch
+from mxnet import nd as mnd
 import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../")))
-from libs import sim
+from libs import agg, fl, sim
+
+def fang_trmean(models, f):
+    model_list = list(models.values())
+    model_keys = list(models.keys())
+    
+    v = []
+    for model in model_list:
+        model_arr = sim.get_mx_net_arr(model)
+        v.append(model_arr.reshape(-1, 1))
+
+    # local model poisoning attack against Trimmed-mean
+    vi_shape = v[0].shape
+    v_tran = mnd.concat(*v, dim=1)
+    maximum_dim = mnd.max(v_tran, axis=1).reshape(vi_shape)
+    minimum_dim = mnd.min(v_tran, axis=1).reshape(vi_shape)
+    direction = mnd.sign(mnd.sum(mnd.concat(*v, dim=1), axis=-1, keepdims=True))
+    directed_dim = (direction > 0) * minimum_dim + (direction < 0) * maximum_dim
+    # let the malicious clients (first f clients) perform the attack
+    for i in range(f):
+        random_12 = 1. + mnd.random.uniform(shape=vi_shape)
+        v[i] = directed_dim * ((direction * directed_dim > 0) / random_12 + (direction * directed_dim < 0) * random_12)
+    
+    dummy_model = model_list[0]
+    _, d_shape = sim.get_net_arr(dummy_model)
+    
+    for index, params in enumerate(v):
+        models[model_keys[index]] = sim.get_arr_net(dummy_model, params.asnumpy(), d_shape)
+    
+    return models
 
 def insert_trojan_plus(instance):
     instance = cv2.rectangle(instance, (13,26), (15,26), (2.8088), (1))
@@ -102,11 +132,33 @@ def layer_replacement_attack(model_to_attack, model_to_reference, layers):
     
     for layer in layers:
         params1[layer] = params2[layer]
-        #params1['fc1.weight'] = params2['fc1.weight']
     
     model = copy.deepcopy(model_to_attack)
     model.load_state_dict(params1, strict=False)
     return model
+
+def lie_attack(models, n_attackers):
+    model_list = list(models.values())
+    model_keys = list(models.keys())
+    
+    dummy_model = model_list[0]
+    _, d_shape = sim.get_net_arr(dummy_model)
+    
+    v = []
+    for model in model_list[n_attackers:]:
+        model_arr, _ = sim.get_net_arr(model)
+        v.append(model_arr)
+    avg = np.array(v).mean(0)
+
+    std = torch.std(torch.tensor(v), 0)
+
+    z_values={3:0.69847, 5:0.7054, 8:0.71904, 10:0.72575, 20:0.73891}
+    mal_update = avg + z_values[n_attackers] * std.numpy()
+    
+    for index in range(n_attackers):
+        models[model_keys[index]] = sim.get_arr_net(dummy_model, mal_update, d_shape)
+    
+    return models
 
 def model_poison_cosine_coord(b_arr, cosargs, c_arr):
     poison_percent = cosargs["poison_percent"] if "poison_percent" in cosargs else 1
@@ -142,15 +194,167 @@ def model_poison_cosine_imp(base_model_update, client_model_update, poison_perce
     client_model_update = sim.get_arr_net(client_model_update, p_arr, c_list)
     return client_model_update
 
-def trim_attack(model):
-    vi_shape = v[0].shape
-    v_tran = nd.concat(*v, dim=1)
-    maximum_dim = nd.max(v_tran, axis=1).reshape(vi_shape)
-    minimum_dim = nd.min(v_tran, axis=1).reshape(vi_shape)
-    direction = nd.sign(nd.sum(nd.concat(*v, dim=1), axis=-1, keepdims=True))
-    directed_dim = (direction > 0) * minimum_dim + (direction < 0) * maximum_dim
-    # let the malicious clients (first f clients) perform the attack
-    for i in range(f):
-        random_12 = 1. + nd.random.uniform(shape=vi_shape)
-        v[i] = directed_dim * ((direction * directed_dim > 0) / random_12 + (direction * directed_dim < 0) * random_12)
-    return v         
+def sota_agr_tailored_trmean(models, n_attackers, dev_type='unit_vec', agg_rule = agg.Rule.T_Mean, threshold=5.0, threshold_diff=1e-5):
+    model_list = list(models.values())
+    model_keys = list(models.keys())
+    
+    dummy_model = model_list[0]
+    _, d_shape = sim.get_net_arr(dummy_model)
+    
+    v = []
+    for model in model_list[n_attackers:]:
+        model_arr, _ = sim.get_net_arr(model)
+        v.append(model_arr)
+    model_re = np.array(v).mean(0)
+    
+    if dev_type == 'sign':
+        deviation = np.sign(model_re)
+    elif dev_type == 'unit_vec':
+        # unit vector, dir opp to good dir
+        deviation = model_re / sim.norm(model_re)
+    elif dev_type == 'std':
+        deviation = torch.std(v, 0)
+
+    lamda = torch.Tensor([threshold])
+
+    threshold_diff = threshold_diff
+    prev_loss = -1
+    lamda_fail = lamda
+    lamda_succ = 0
+
+    while torch.abs(lamda_succ - lamda) > threshold_diff:
+        mal_update = (model_re - (lamda * deviation).numpy())
+        
+        for index in range(n_attackers):
+            models[model_keys[index]] = sim.get_arr_net(dummy_model, mal_update, d_shape)
+
+        # Average
+        avgargs = {"beta": n_attackers}
+        agg_model = fl.federated_avg(models, None, agg_rule, **avgargs)
+        agg_grads, _ = sim.get_net_arr(agg_model)
+
+        loss = sim.norm(agg_grads - model_re)
+        if prev_loss < loss:
+            lamda_succ = lamda
+            lamda = lamda + lamda_fail / 2
+        else:
+            lamda = lamda - lamda_fail / 2
+
+        lamda_fail = lamda_fail / 2
+        prev_loss = loss
+
+    mal_update = (model_re - (lamda * deviation).numpy())
+    
+    for index in range(n_attackers):
+        models[model_keys[index]] = sim.get_arr_net(dummy_model, mal_update, d_shape)
+    
+    return models
+
+def sota_agnostic_min_max(models, n_attackers, dev_type='unit_vec'):
+    model_list = list(models.values())
+    model_keys = list(models.keys())
+    
+    dummy_model = model_list[0]
+    _, d_shape = sim.get_net_arr(dummy_model)
+    
+    v = []
+    for model in model_list[n_attackers:]:
+        model_arr, _ = sim.get_net_arr(model)
+        v.append(model_arr)
+    model_re = np.array(v).mean(0)
+    
+    if dev_type == 'sign':
+        deviation = np.sign(model_re)
+    elif dev_type == 'unit_vec':
+        # unit vector, dir opp to good dir
+        deviation = model_re / sim.norm(model_re)
+    elif dev_type == 'std':
+        deviation = torch.std(v, 0)
+
+    lamda = torch.Tensor([50.0]).float()
+    threshold_diff = 1e-5
+    lamda_fail = lamda
+    lamda_succ = 0
+    
+    distances = []
+    for _v in v:
+        distance = torch.norm((torch.tensor(v) - torch.tensor(_v)), dim=1) ** 2
+        distances = distance[None, :] if not len(distances) else torch.cat((distances, distance[None, :]), 0)
+    
+    max_distance = torch.max(distances)
+    del distances
+
+    while torch.abs(lamda_succ - lamda) > threshold_diff:
+        mal_update = (model_re - (lamda * deviation).numpy())
+        distance = torch.norm((torch.tensor(v) - torch.tensor(mal_update)), dim=1) ** 2
+        max_d = torch.max(distance)
+        
+        if max_d <= max_distance:
+            lamda_succ = lamda
+            lamda = lamda + lamda_fail / 2
+        else:
+            lamda = lamda - lamda_fail / 2
+
+        lamda_fail = lamda_fail / 2
+
+    mal_update = (model_re - (lamda * deviation).numpy())
+
+    for index in range(n_attackers):
+        models[model_keys[index]] = sim.get_arr_net(dummy_model, mal_update, d_shape)
+    
+    return models
+
+def sota_agnostic_min_sum(models, n_attackers, dev_type='unit_vec'):
+    model_list = list(models.values())
+    model_keys = list(models.keys())
+    
+    dummy_model = model_list[0]
+    _, d_shape = sim.get_net_arr(dummy_model)
+    
+    v = []
+    for model in model_list[n_attackers:]:
+        model_arr, _ = sim.get_net_arr(model)
+        v.append(model_arr)
+    model_re = np.array(v).mean(0)
+    
+    if dev_type == 'sign':
+        deviation = np.sign(model_re)
+    elif dev_type == 'unit_vec':
+        # unit vector, dir opp to good dir
+        deviation = model_re / sim.norm(model_re)
+    elif dev_type == 'std':
+        deviation = torch.std(v, 0)
+
+    lamda = torch.Tensor([50.0]).float()
+    threshold_diff = 1e-5
+    lamda_fail = lamda
+    lamda_succ = 0
+    
+    distances = []
+    for _v in v:
+        distance = torch.norm((torch.tensor(v) - torch.tensor(_v)), dim=1) ** 2
+        distances = distance[None, :] if not len(distances) else torch.cat((distances, distance[None, :]), 0)
+    
+    scores = torch.sum(distances, dim=1)
+    min_score = torch.min(scores)
+    del distances
+
+    while torch.abs(lamda_succ - lamda) > threshold_diff:
+        mal_update = (model_re - (lamda * deviation).numpy())
+        distance = torch.norm((torch.tensor(v) - torch.tensor(mal_update)), dim=1) ** 2
+        score = torch.sum(distance)
+        
+        if score <= min_score:
+            lamda_succ = lamda
+            lamda = lamda + lamda_fail / 2
+        else:
+            lamda = lamda - lamda_fail / 2
+
+        lamda_fail = lamda_fail / 2
+
+    mal_update = (model_re - (lamda * deviation).numpy())
+
+    for index in range(n_attackers):
+        models[model_keys[index]] = sim.get_arr_net(dummy_model, mal_update, d_shape)
+    
+    return models

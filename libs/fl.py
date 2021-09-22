@@ -11,13 +11,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../")))
 from libs import agg
 
 def audit_attack(target, pred, flip_labels, attack_dict):
-    for i in range(len(target)):
-        if target[i].item() in flip_labels.keys():
-            attack_dict["instances"] += 1
-            if target[i] != pred[i]:
-                attack_dict["misclassifications"] += 1
-                if pred[i].item() == flip_labels[target[i].item()]:
-                    attack_dict["attack_success_count"] += 1
+    if flip_labels is not None and len(flip_labels) > 0:
+        for i in range(len(target)):
+            if target[i].item() in flip_labels.keys():
+                attack_dict["instances"] += 1
+                if target[i] != pred[i]:
+                    attack_dict["misclassifications"] += 1
+                    if pred[i].item() == flip_labels[target[i].item()]:
+                        attack_dict["attack_success_count"] += 1
 
 def backdoor_test(model, backdoor_test_loader, device, backdoor_target):
     model.eval()
@@ -66,7 +67,7 @@ def evaluate(model, test_loader, device, flip_labels):
         "accuracy": 0
     }
     
-    if len(flip_labels) > 0:
+    if flip_labels is not None and len(flip_labels) > 0:
         test_output["attack"] = {
             "instances": 0,
             "misclassifications": 0,
@@ -81,14 +82,14 @@ def evaluate(model, test_loader, device, flip_labels):
             output = model(data)
             test_output["test_loss"] += F.nll_loss(output, target, reduction='sum').item()
             pred = output.argmax(dim=1, keepdim=True)
-            if len(flip_labels) > 0:
+            if flip_labels is not None and len(flip_labels) > 0:
                 audit_attack(target, pred, flip_labels, test_output["attack"])
             test_output["correct"] += pred.eq(target.view_as(pred)).sum().item()
 
     test_output["test_loss"] /= len(test_loader.dataset)
     test_output["accuracy"] = (test_output["correct"] / len(test_loader.dataset)) * 100
 
-    if len(flip_labels) > 0:
+    if flip_labels is not None and len(flip_labels) > 0:
         test_output["attack"]["attack_success_rate"] = (test_output["attack"]["attack_success_count"] /
                                                         test_output["attack"]["instances"]) * 100
         test_output["attack"]["misclassification_rate"] = (test_output["attack"]["misclassifications"] / \
@@ -104,10 +105,16 @@ def federated_avg(models: Dict[Any, torch.nn.Module],
             model = agg.FedAvg(base_model, models)
         if rule is agg.Rule.FLTrust:
             model = agg.FLTrust(base_model, models, **kwargs)
-        if rule is agg.Rule.T_Mean:
-            model = agg.T_Mean(base_model, models, **kwargs)
         if rule is agg.Rule.FLTC:
             model = agg.FLTC(base_model, models, **kwargs)
+        if rule is agg.Rule.Krum:
+            model = agg.Krum(base_model, models, **kwargs)
+        if rule is agg.Rule.M_Krum:
+            model = agg.M_Krum(base_model, models, **kwargs)
+        if rule is agg.Rule.Median:
+            model = agg.Median(base_model, models, **kwargs)
+        if rule is agg.Rule.T_Mean:
+            model = agg.T_Mean(base_model, models, **kwargs)
     else:
         model = copy.deepcopy(list(models.values())[0])
     return model

@@ -62,7 +62,7 @@ def dot(arr1, arr2):
     return cs.asnumpy()[0]
 
 def eucliden_dist(arr1, arr2):
-    return sum((arr1 - arr2)**2)
+    return nd.linalg.norm(arr1-arr2)
     
 def get_arr_net(_model, arr, slist):
     arr = torch.from_numpy(arr).unsqueeze(1)
@@ -124,14 +124,18 @@ def get_net_arr(model):
     return arr, slist
 
 def grad_cosine_similarity(model1, model2):
-    arr1 = get_mx_net_arr(model1)
-    arr2 = get_mx_net_arr(model2)
-    cs = mnd.dot(arr1, arr2) / (mnd.norm(arr1) + 1e-9) / (mnd.norm(arr2) + 1e-9)
-    return cs.asnumpy()[0]
+    arr1, _ = get_net_arr(model1)
+    arr2, _ = get_net_arr(model2)
+    return cosine_similarity(arr1, arr2)
+
+def grad_eucliden_dist(model1, model2):
+    arr1, _ = get_net_arr(model1)
+    arr2, _ = get_net_arr(model2)
+    return eucliden_dist(arr1, arr2)
 
 def grad_norm(model):
-    arr = get_mx_net_arr(model)
-    return mnd.norm(arr).asnumpy()[0]
+    arr, _ = get_net_arr(model)
+    return norm(arr)
 
 def max_min_norm(arr):
     if (max(arr) - min(arr)) != 0:

@@ -1,6 +1,8 @@
 import copy, enum, torch
 import numpy as np
-from functools import reduce
+from functools import reduce, partial
+import multiprocessing
+from multiprocessing import Pool, Process
 
 import os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../")))
@@ -9,9 +11,11 @@ from libs import sim, log
 class Rule(enum.Enum):
     FedAvg = 0
     FLTrust = 1
-    T_Mean = 2
-    FLTC = 3
-    FLTC_Layer = 4
+    FLTC = 2
+    Krum = 3
+    M_Krum = 4
+    Median = 5
+    T_Mean = 6
 
 def verify_model(base_model, model):
     params1 = base_model.state_dict().copy()
@@ -104,6 +108,39 @@ def FLTrust(base_model, models, **kwargs):
         model = sub_model(base_model, model)
     return model
 
+def get_trusted_components(eucliden_dist, cosine_score, no_of_clients, params):
+    index = params[0]
+    b_arr = params[1]
+    m_arr = params[2]
+    n_arr = params[3]
+    trusted_component = 0
+
+    a_euc_score = (b_arr - m_arr) / eucliden_dist
+
+    l_indices = np.where(m_arr > b_arr)
+    s_indices = np.where(m_arr < b_arr)
+    trusted_components = l_indices if len(l_indices[0]) > len(s_indices[0]) else s_indices
+
+    '''
+    sign_p = np.where(np.sign(a_euc_score) == 1)
+    sign_n = np.where(np.sign(a_euc_score) == -1)
+    trusted_components = sign_p if len(sign_p[0]) > len(sign_n[0]) else sign_n
+    '''
+
+    euc_score  = a_euc_score[trusted_components]
+    if len(euc_score) > 1:
+        ts_score = sim.min_max_norm(euc_score)
+
+        client_score = np.zeros(no_of_clients)
+        for _index, _trusted_component in enumerate(trusted_components[0]):
+            client_score[_trusted_component] = ts_score[_index]
+        #client_score = client_score * cosine_score
+
+        if sum(client_score) > 0:
+            trusted_component = sum((n_arr * client_score) / sum(client_score))
+            
+    return (trusted_component, client_score)
+    
 def FLTC(base_model, models, **kwargs):
     base_model_update = kwargs["base_model_update"]   
     base_model_update_norm = sim.grad_norm(base_model_update)
@@ -113,6 +150,7 @@ def FLTC(base_model, models, **kwargs):
     eucliden_dist = []
     normalized_model_list = []
     updated_model_list = []
+
     for model in list(models.values()):
         model_arr, _ = sim.get_net_arr(model)
         updated_model_list.append(model_arr)
@@ -126,8 +164,7 @@ def FLTC(base_model, models, **kwargs):
 
     cosine_score = np.array(cosine_dist)
     cosine_score[np.where(cosine_score < 0)] = 0
-    print("Cosine score", cosine_score)
-    #cosine_score = sim.min_max_norm(cosine_score)
+    cosine_score = sim.min_max_norm(cosine_score)
     eucliden_dist = np.array(eucliden_dist)
 
     updated_model_tensors = torch.tensor(updated_model_list)
@@ -137,42 +174,21 @@ def FLTC(base_model, models, **kwargs):
     normalized_model_tensors = torch.tensor(normalized_model_list)
     normalized_updated_model_tensors = torch.stack([model for model in normalized_model_tensors], 0)
     normalized_updated_model_arrs = torch.transpose(normalized_updated_model_tensors, 0, 1).numpy()
-
-    client_scores = np.ones(len(models))
-    model_arr = np.zeros(len(base_model_arr))
     
-    for index, (b_arr, m_arr, n_arr) in enumerate(zip(base_model_arr, merged_updated_model_arrs, normalized_updated_model_arrs)):
-        a_euc_score = (b_arr - m_arr) / eucliden_dist
-
-        l_indices = np.where(m_arr > b_arr)
-        s_indices = np.where(m_arr < b_arr)
-        trusted_components = l_indices if len(l_indices[0]) > len(s_indices[0]) else s_indices
+    with Pool(min(multiprocessing.cpu_count(), 20)) as p:
+        func = partial(get_trusted_components, eucliden_dist, cosine_score, len(models))
+        trusted_components = p.map(func, [(index, b_arr, m_arr, n_arr) for index, (b_arr, m_arr, n_arr) in enumerate(zip(base_model_arr, merged_updated_model_arrs, normalized_updated_model_arrs))])
+        p.close()
+        p.join()
         
-        '''
-        sign_p = np.where(np.sign(a_euc_score) == 1)
-        sign_n = np.where(np.sign(a_euc_score) == -1)
-        trusted_components = sign_p if len(sign_p[0]) > len(sign_n[0]) else sign_n
-        '''
+    model_arr = np.zeros(len(base_model_arr))
+    client_scores = np.zeros(len(models))    
 
-        euc_score  = a_euc_score[trusted_components]
-        if len(euc_score) > 1:
-            ts_score = sim.min_max_norm(euc_score)
+    for index, (trusted_component, client_score) in enumerate(trusted_components):
+        model_arr[index] = trusted_component
+        client_scores = client_scores + client_score
 
-            client_score = np.zeros(len(models))
-            for _index, trusted_component in enumerate(trusted_components[0]):
-                client_score[trusted_component] = ts_score[_index]
-            client_scores = (client_scores + client_score) / 2
-
-            if index == 10:
-                print("b_arr", b_arr)                
-                print("n_arr", n_arr)               
-                print("m_arr", m_arr)                
-                print("a_euc", a_euc_score)
-                print("client_score", client_score)
-                
-            if sum(client_score) > 0:
-                model_arr[index] = sum((m_arr * client_score) / sum(client_score))
-
+    client_scores = client_scores / len(base_model_arr)
     log.info("FLTC Score {}".format(client_scores))
     
     model = sim.get_arr_net(base_model_update, model_arr, b_list)
@@ -307,7 +323,116 @@ def _FLTC(base_model, models, **kwargs):
         model = sub_model(base_model, model)
     return model
 
+def Krum(base_model, models, **kwargs):
+    model_list = list(models.values())
+
+    beta = kwargs["beta"]
+    lb = beta//2
+    ub = len(model_list) - beta//2 - 1
+    
+    euclidean_dists = []
+    for index1, model1 in enumerate(model_list):
+        model_dists = []
+        for index2, model2 in enumerate(model_list):
+            if index1 != index2:
+                dist = sim.grad_eucliden_dist(model1, model2)
+                model_dists.append(dist)
+        sq_dists = torch.sum(torch.sort(torch.tensor(model_dists)).values[lb:ub])
+        euclidean_dists.append(sq_dists)
+    
+    min_model_index = euclidean_dists.index(min(euclidean_dists)) 
+    log.info("Krum Candidate is {}".format(list(models.keys)[min_model_index]))
+
+    model = model_list[min_model_index]
+    if base_model is not None:
+        model = sub_model(base_model, model_list[min_model_index])
+    return model
+
+def M_Krum(base_model, models, **kwargs):
+    model_list = list(models.values())
+
+    beta = kwargs["beta"]
+    lb = beta//2
+    ub = len(model_list) - beta//2 - 1
+
+    euclidean_dists = []
+    for index1, model1 in enumerate(model_list):
+        model_dists = []
+        for index2, model2 in enumerate(model_list):
+            if index1 != index2:
+                dist = sim.grad_eucliden_dist(model1, model2)
+                model_dists.append(dist)
+        sq_dists = torch.sum(torch.sort(torch.tensor(model_dists)).values[lb:ub])
+        euclidean_dists.append(sq_dists)
+            
+    min_model_indices = np.argpartition(euclidean_dists, len(model_list) - 2*beta - 2)
+    log.info("M_Krum Candidates are {}".format(list(models.keys)[min_model_indices]))
+    
+    model_list = [model for index, model in enumerate(model_list) if index in min_model_indices]
+
+    model = reduce(add_model, model_list)
+    model = scale_model(model, 1.0 / len(models))
+
+    if base_model is not None:
+        model = sub_model(base_model, model)
+    return model
+
+def Median(base_model, models, **kwargs):
+    model_list = list(models.values())
+    dummy_model = model_list[0]
+    dummy_model_arr, d_list = sim.get_net_arr(dummy_model)
+
+    beta = kwargs["beta"]
+    lb = beta
+    ub = len(model_list) - beta
+
+    updated_model_list = []
+    for model in model_list:
+        model_arr, _ = sim.get_net_arr(model)
+        updated_model_list.append(model_arr)
+        
+    updated_model_tensors = torch.tensor(updated_model_list)
+    merged_updated_model_tensors = torch.sort(torch.stack([model for model in updated_model_tensors], 0), dim = 0)
+    merged_updated_model_arrs = torch.transpose(merged_updated_model_tensors.values, 0, 1).numpy()
+    merged_updated_model_indices = torch.transpose(merged_updated_model_tensors.indices, 0, 1).numpy()
+
+    model_arr = np.zeros(len(dummy_model_arr))
+    for index, arr in enumerate(merged_updated_model_arrs):
+        model_arr[index] = np.median(arr)
+    model = sim.get_arr_net(dummy_model, model_arr, d_list)
+    
+    if base_model is not None:
+        model = sub_model(base_model, model)
+    return model
+
 def T_Mean(base_model, models, **kwargs):
+    model_list = list(models.values())
+    dummy_model = model_list[0]
+    dummy_model_arr, d_list = sim.get_net_arr(dummy_model)
+
+    beta = kwargs["beta"]
+    lb = beta
+    ub = len(model_list) - beta
+
+    updated_model_list = []
+    for model in model_list:
+        model_arr, _ = sim.get_net_arr(model)
+        updated_model_list.append(model_arr)
+        
+    updated_model_tensors = torch.tensor(updated_model_list)
+    merged_updated_model_tensors = torch.sort(torch.stack([model for model in updated_model_tensors], 0), dim = 0)
+    merged_updated_model_arrs = torch.transpose(merged_updated_model_tensors.values, 0, 1).numpy()
+    
+    model_arr = np.zeros(len(dummy_model_arr))
+    for index, arr in enumerate(merged_updated_model_arrs):
+        model_arr[index] = arr[lb:ub].mean(0)
+    model = sim.get_arr_net(dummy_model, model_arr, d_list)
+    
+    if base_model is not None:
+        model = sub_model(base_model, model)
+    return model
+
+def _T_Mean(base_model, models, **kwargs):
     model_list = list(models.values())
     dummy_model = copy.deepcopy(model_list[0])
     dummy_dict = dummy_model.state_dict()
@@ -319,5 +444,5 @@ def T_Mean(base_model, models, **kwargs):
 
     dummy_model.load_state_dict(dummy_dict)
     if base_model is not None:
-        base_model = sub_model(base_model, dummy_model)
-    return base_model
+        model = sub_model(base_model, dummy_model)
+    return model
