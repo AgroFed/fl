@@ -1,4 +1,6 @@
 import copy, cv2, enum, heapq, os, sys, torch
+from functools import partial
+from multiprocessing import Pool, Process
 from mxnet import nd as mnd
 import numpy as np
 
@@ -6,8 +8,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../")))
 from libs import agg, fl, sim
 
 class Knowledge(enum.Enum):
-    FN = 0
-    PN = 1
+    IN = 0
+    FN = 1
+    PN = 2
 
 def fang_trmean(models, f, kn = Knowledge.PN):
     model_list = list(models.values())
@@ -194,17 +197,39 @@ def model_poison_cosine_coord(b_arr, cosargs, c_arr):
 
     return p_arr, params_changed
 
-def model_poison_cosine_imp(base_model_update, client_model_update, poison_percent):
-    b_arr, b_list = sim.get_net_arr(base_model_update)
-    c_arr, c_list = sim.get_net_arr(client_model_update)
-    
-    npd = c_arr - b_arr
-    p_arr = copy.deepcopy(c_arr)
-    for index in heapq.nlargest(int(len(npd) * poison_percent), range(len(npd)), npd.take):
-        p_arr[index] = p_arr[index] + (2* npd[index])
+def sine_attack(base_model_update, cosine_args, epoch, models, n_attackers, kn = Knowledge.IN):
+    model_list = list(models.values())
+    mal_updates = []
+    params_changed = 0
 
-    client_model_update = sim.get_arr_net(client_model_update, p_arr, c_list)
-    return client_model_update
+    b_arr, b_list = sim.get_net_arr(base_model_update)
+            
+    if epoch % cosine_args["scale_epoch"] == 0:
+        cosine_args["scale_dot"] = cosine_args["scale_dot_factor"] + cosine_args["scale_dot"]
+        cosine_args["scale_norm"] = cosine_args["scale_norm_factor"] * cosine_args["scale_norm"]
+
+    if kn is Knowledge.IN:
+        with Pool(n_attackers) as p:
+            func = partial(model_poison_cosine_coord, b_arr, cosine_args)
+            p_models = p.map(func, [sim.get_net_arr(model_list[attacker])[0] for attacker in range(n_attackers)])
+            p.close()
+            p.join()
+
+        mal_updates = [sim.get_arr_net(base_model_update, p_arr, b_list) for p_arr, _ in p_models]
+        params_changed = p_models[0][1]
+    else:
+        if kn is Knowledge.PN:
+            model_list = model_list[:n_attackers]
+        elif kn is Knowledge.FN:
+            model_list = model_list[n_attackers:]
+
+        model_re = np.array([sim.get_net_arr(model)[0] for model in model_list]).mean(0)
+        p_model_arr, params_changed = model_poison_cosine_coord(b_arr, cosine_args, model_re)
+        p_model = sim.get_arr_net(base_model_update, p_model_arr, b_list)
+
+        mal_updates = [p_model for attacker in range(n_attackers)]
+            
+    return mal_updates, params_changed
 
 def sota_agr_tailored_trmean(models, n_attackers, kn = Knowledge.PN, dev_type='unit_vec', agg_rule = agg.Rule.T_Mean, threshold=5.0, threshold_diff=1e-5):
     model_list = list(models.values())

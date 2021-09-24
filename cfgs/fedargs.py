@@ -73,7 +73,8 @@ cosine_attack = {"is": False,
                           "scale_norm": 500,
                           "scale_norm_factor": 2,
                           "scale_epoch": 5},
-                 "func": poison.model_poison_cosine_coord}
+                 "kn": poison.Knowledge.IN,
+                 "func": poison.sine_attack}
 
 # Fang attack proposed for trimmed mean
 fang_attack = {"is": False,
