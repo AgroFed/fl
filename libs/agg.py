@@ -108,76 +108,46 @@ def FLTrust(base_model, models, **kwargs):
         model = sub_model(base_model, model)
     return model
 
-def get_trusted_components(eucliden_dist, cosine_score, no_of_clients, params):
-    index = params[0]
-    b_arr = params[1]
-    m_arr = params[2]
-    n_arr = params[3]
+def get_trusted_components(eucliden_dist, no_of_clients, params):
+    b_arr = params[0]
+    m_arr = params[1]
     trusted_component = 0
 
     a_euc_score = (b_arr - m_arr) / eucliden_dist
 
-    l_indices = np.where(m_arr > b_arr)
-    s_indices = np.where(m_arr < b_arr)
-    trusted_components = l_indices if len(l_indices[0]) > len(s_indices[0]) else s_indices
-
-    '''
     sign_p = np.where(np.sign(a_euc_score) == 1)
     sign_n = np.where(np.sign(a_euc_score) == -1)
     trusted_components = sign_p if len(sign_p[0]) > len(sign_n[0]) else sign_n
-    '''
 
-    euc_score  = a_euc_score[trusted_components]
-    if len(euc_score) > 1:
-        ts_score = sim.min_max_norm(euc_score)
-
-        client_score = np.zeros(no_of_clients)
-        for _index, _trusted_component in enumerate(trusted_components[0]):
-            client_score[_trusted_component] = ts_score[_index]
-        #client_score = client_score * cosine_score
-
-        if sum(client_score) > 0:
-            trusted_component = sum((n_arr * client_score) / sum(client_score))
-            
+    client_score = np.zeros(no_of_clients)
+    if len(a_euc_score[trusted_components]) > 1:
+        client_score[trusted_components] = sim.min_max_norm(a_euc_score[trusted_components])
+     
+    trusted_component = b_arr
+    if sum(client_score) > 0:
+        trusted_component = sum((m_arr * client_score) / sum(client_score))
     return (trusted_component, client_score)
     
 def FLTC(base_model, models, **kwargs):
-    base_model_update = kwargs["base_model_update"]   
-    base_model_update_norm = sim.grad_norm(base_model_update)
+    base_model_update = kwargs["base_model_update"]
     base_model_arr, b_list = sim.get_net_arr(base_model_update)
 
-    cosine_dist = []
     eucliden_dist = []
-    normalized_model_list = []
     updated_model_list = []
 
     for model in list(models.values()):
         model_arr, _ = sim.get_net_arr(model)
         updated_model_list.append(model_arr)
-        
-        norm = sim.grad_norm(model)
-        ndiv = base_model_update_norm / norm
-        normalized_model_list.append(model_arr * ndiv)
-           
-        cosine_dist.append(sim.cosine_similarity(base_model_arr, model_arr))
         eucliden_dist.append(sim.eucliden_dist(base_model_arr, model_arr))
-
-    cosine_score = np.array(cosine_dist)
-    cosine_score[np.where(cosine_score < 0)] = 0
-    cosine_score = sim.min_max_norm(cosine_score)
     eucliden_dist = np.array(eucliden_dist)
 
     updated_model_tensors = torch.tensor(updated_model_list)
     merged_updated_model_tensors = torch.stack([model for model in updated_model_tensors], 0)
     merged_updated_model_arrs = torch.transpose(merged_updated_model_tensors, 0, 1).numpy()
     
-    normalized_model_tensors = torch.tensor(normalized_model_list)
-    normalized_updated_model_tensors = torch.stack([model for model in normalized_model_tensors], 0)
-    normalized_updated_model_arrs = torch.transpose(normalized_updated_model_tensors, 0, 1).numpy()
-    
     with Pool(min(multiprocessing.cpu_count(), 20)) as p:
-        func = partial(get_trusted_components, eucliden_dist, cosine_score, len(models))
-        trusted_components = p.map(func, [(index, b_arr, m_arr, n_arr) for index, (b_arr, m_arr, n_arr) in enumerate(zip(base_model_arr, merged_updated_model_arrs, normalized_updated_model_arrs))])
+        func = partial(get_trusted_components, eucliden_dist, len(models))
+        trusted_components = p.map(func, [(b_arr, m_arr) for b_arr, m_arr in zip(base_model_arr, merged_updated_model_arrs)])
         p.close()
         p.join()
         
@@ -191,132 +161,6 @@ def FLTC(base_model, models, **kwargs):
     client_scores = client_scores / len(base_model_arr)
     log.info("FLTC Score {}".format(client_scores))
     
-    model = sim.get_arr_net(base_model_update, model_arr, b_list)
-    
-    if base_model is not None:
-        model = sub_model(base_model, model)
-    return model
-
-def FLTC_Layer(base_model, models, **kwargs):
-    base_model_update = kwargs["base_model_update"] 
-    base_model_arr, b_list = sim.get_net_arr(base_model_update)
-    
-    updated_model_list = []
-    normalized_model_list = []
-    for model in list(models.values()):
-        model_arr, _ = sim.get_net_arr(model)
-        updated_model_list.append(model_arr)
-        
-    updated_model_arrs = np.array(updated_model_list)    
-    updated_model_tensors = torch.tensor(updated_model_list)
-    merged_updated_model_tensors = torch.stack([model for model in updated_model_tensors], 0)
-    merged_updated_model_arrs = torch.transpose(merged_updated_model_tensors, 0, 1).numpy()
-
-    client_scores = np.ones(len(models))
-    model_arr = np.zeros(len(base_model_arr))
-    
-    start_index = 0
-    for shape in b_list:
-        end_index = start_index + np.prod(list(shape))
-        sub_base_arr = base_model_arr[start_index:end_index]
-        eucliden_dist = np.array([sim.eucliden_dist(sub_base_arr, model[start_index:end_index]) for model in updated_model_arrs])
-        
-        for index in range(start_index, end_index):
-            b_arr = base_model_arr[index]
-            arr = merged_updated_model_arrs[index]
-
-            euc_score = (b_arr - arr) / eucliden_dist
-
-            sign_p = np.where(np.sign(euc_score) == 1)
-            sign_n = np.where(np.sign(euc_score) == -1)
-            trusted_components = sign_p if len(sign_p[0]) > len(sign_n[0]) else sign_n
-
-            arr = arr[trusted_components]
-            euc_score  = euc_score[trusted_components]
-            if len(euc_score) > 1:
-                ts_score = sim.min_max_norm(euc_score)
-
-                client_score = np.zeros(len(models))
-                for _index, trusted_component in enumerate(trusted_components[0]):
-                    client_score[trusted_component] = ts_score[_index]
-                client_scores = (client_scores + client_score) / 2
-
-                if sum(ts_score) > 0:
-                    model_arr[index] = sum((arr * ts_score) / sum(ts_score))
-        
-        start_index = end_index
-
-    log.info("FLTC Score {}".format(client_scores))
-    
-    model = sim.get_arr_net(base_model_update, model_arr, b_list)
-    
-    if base_model is not None:
-        model = sub_model(base_model, model)
-    return model
-
-def _FLTC(base_model, models, **kwargs):
-    base_model_update = kwargs["base_model_update"]
-    base_model_update_norm = sim.grad_norm(base_model_update)
-    base_model_arr, b_list = sim.get_net_arr(base_model_update)
-    
-    model_list = list(models.values())
-    updated_model_list = []
-    for model in model_list:
-        norm = sim.grad_norm(model)
-        ndiv = base_model_update_norm/norm
-        model = scale_model(model, ndiv)
-        model_arr, _ = sim.get_net_arr(model)
-        updated_model_list.append(model_arr)
-        
-    updated_model_tensors = torch.tensor(updated_model_list)
-    merged_updated_model_tensors = torch.sort(torch.stack([model for model in updated_model_tensors], 0), dim = 0)
-    merged_updated_model_arrs = torch.transpose(merged_updated_model_tensors.values, 0, 1).numpy()
-    merged_updated_model_indices = torch.transpose(merged_updated_model_tensors.indices, 0, 1).numpy()
-    
-    bs_score = base_model_arr / base_model_update_norm
-    bs_theta = np.arccos(bs_score)
-    client_scores = np.ones(len(models))
-
-    model_arr = np.zeros(len(base_model_arr))
-    
-    for index, arr in enumerate(merged_updated_model_arrs):
-        l_indices = np.where(arr >= base_model_arr[index])
-        l_arr = arr[l_indices]
-        
-        s_indices = np.where(arr < base_model_arr[index])
-        s_arr = arr[s_indices]
-        
-        arr = s_arr
-        indices = s_indices
-        if len(l_arr) > len(s_arr):
-            arr = l_arr
-            indices = l_indices
-
-        ts_score = arr / base_model_update_norm
-        ts_theta = np.arccos(ts_score)
-        # wrt bs_theta
-        ts_theta = bs_theta[index] - ts_theta
-        ts_score = np.cos(ts_theta)
-
-        # Relu
-        #ts_score[np.where(ts_score < 0)] = 0
-        
-        # Sybils
-        #ts_score = sim.max_min_norm(ts_score)
-        
- 
-        # Clients scores
-        client_score = np.zeros(len(models))
-        for _ind, ind in enumerate(merged_updated_model_indices[index][indices]):
-            client_score[ind] = ts_score[_ind]
-        client_scores = (client_scores + client_score) / 2
-
-        if sum(ts_score) > 0:
-            model_arr[index] = sum((arr * ts_score) / sum(ts_score))
-
-
-    print("Client_scores", client_scores)
-
     model = sim.get_arr_net(base_model_update, model_arr, b_list)
     
     if base_model is not None:
@@ -433,19 +277,4 @@ def T_Mean(base_model, models, **kwargs):
     
     if base_model is not None:
         model = sub_model(base_model, model)
-    return model
-
-def _T_Mean(base_model, models, **kwargs):
-    model_list = list(models.values())
-    dummy_model = copy.deepcopy(model_list[0])
-    dummy_dict = dummy_model.state_dict()
-    beta = kwargs["beta"]
-    
-    for k in dummy_dict.keys():
-        merged_tensors = torch.sort(torch.stack([model.state_dict()[k].float() for model in model_list], 0), dim = 0)
-        dummy_dict[k] = merged_tensors.values[beta : len(model_list) - beta].mean(0)
-
-    dummy_model.load_state_dict(dummy_dict)
-    if base_model is not None:
-        model = sub_model(base_model, dummy_model)
     return model

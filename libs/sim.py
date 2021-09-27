@@ -137,6 +137,11 @@ def grad_norm(model):
     arr, _ = get_net_arr(model)
     return norm(arr)
 
+def grad_ssd(model1, model2):
+    arr1, _ = get_net_arr(model1)
+    arr2, _ = get_net_arr(model2)
+    return ssd(arr1, arr2)
+
 def max_min_norm(arr):
     if (max(arr) - min(arr)) != 0:
         return (max(arr) - arr) / (max(arr) - min(arr))
@@ -151,6 +156,9 @@ def min_max_norm(arr):
 
 def norm(arr):
     return mnd.norm(mnd.array(arr)).asnumpy()[0]
+
+def ssd(arr1, arr2):
+    return sum((arr1-arr2)**2)
 
 '''
 import torch
