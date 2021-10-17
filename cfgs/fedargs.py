@@ -9,7 +9,7 @@ argsdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe()
 class FedArgs():
     def __init__(self):
         self.num_clients = 50
-        self.epochs = 50
+        self.epochs = 51
         self.local_rounds = 1
         self.client_batch_size = 10
         self.test_batch_size = 10
