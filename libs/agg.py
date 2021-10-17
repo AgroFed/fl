@@ -112,14 +112,17 @@ def get_trusted_components(eucliden_dist, no_of_clients, params):
     b_arr = params[0]
     m_arr = params[1]
     trusted_component = 0
-
-    a_euc_score = (b_arr - m_arr) / eucliden_dist
-
-    sign_p = np.where(np.sign(a_euc_score) == 1)
-    sign_n = np.where(np.sign(a_euc_score) == -1)
-    trusted_components = sign_p if len(sign_p[0]) > len(sign_n[0]) else sign_n
-
     client_score = np.zeros(no_of_clients)
+
+    try:
+        a_euc_score = (b_arr - m_arr) / eucliden_dist
+        sign_p = np.where(np.sign(a_euc_score) == 1)
+        sign_n = np.where(np.sign(a_euc_score) == -1)
+        trusted_components = sign_p if len(sign_p[0]) > len(sign_n[0]) else sign_n
+    except:
+        return (b_arr, client_score)
+
+    
     if len(a_euc_score[trusted_components]) > 1:
         client_score[trusted_components] = sim.min_max_norm(a_euc_score[trusted_components])
      

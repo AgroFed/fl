@@ -42,6 +42,24 @@ def backdoor_test(model, backdoor_test_loader, device, backdoor_target):
 
     return test_output
 
+def client_binary(_model, data_loader, learning_rate, decay, epochs, device):
+    model = copy.deepcopy(_model)
+    loss = {}
+    criterion = torch.nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=decay)
+    model.train()
+    for epoch in range(epochs):
+        for batch_idx, (data, target) in enumerate(data_loader):
+            data, target = data.to(device), target.to(device)
+            optimizer.zero_grad()
+            output = model(data)
+            _loss = criterion(output, target)
+            _loss.backward()
+            optimizer.step()
+
+        loss["Epoch " + str(epoch + 1)] = _loss.item()
+    return model, loss
+
 def client_update(_model, data_loader, learning_rate, decay, epochs, device):
     model = copy.deepcopy(_model)
     loss = {}
@@ -97,6 +115,47 @@ def evaluate(model, test_loader, device, flip_labels):
 
     return test_output
 
+def evaluate_binary(model, test_loader, device, flip_labels):
+    criterion = torch.nn.BCELoss()
+    size = 0
+    model.eval()
+    test_output = {
+        "test_loss": 0,
+        "correct": 0,
+        "accuracy": 0
+    }
+    
+    if flip_labels is not None and len(flip_labels) > 0:
+        test_output["attack"] = {
+            "instances": 0,
+            "misclassifications": 0,
+            "attack_success_count": 0,
+            "misclassification_rate": 0,
+            "attack_success_rate": 0
+        }
+
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            size += len(data)
+            output = model(data)
+            test_output["test_loss"] += criterion(output, target).item()
+            pred = output.argmax(dim=1, keepdim=True)
+            if flip_labels is not None and len(flip_labels) > 0:
+                audit_attack(target, pred, flip_labels, test_output["attack"])
+            test_output["correct"] += pred.eq(target.view_as(pred)).sum().item()
+
+    test_output["test_loss"] /= size
+    test_output["accuracy"] = (test_output["correct"] / size) * 100
+
+    if flip_labels is not None and len(flip_labels) > 0:
+        test_output["attack"]["attack_success_rate"] = (test_output["attack"]["attack_success_count"] /
+                                                        test_output["attack"]["instances"]) * 100
+        test_output["attack"]["misclassification_rate"] = (test_output["attack"]["misclassifications"] / \
+                                                          test_output["attack"]["instances"]) * 100
+
+    return test_output
+
 def federated_avg(models: Dict[Any, torch.nn.Module],
                   base_model: torch.nn.Module = None,
                   rule: agg.Rule = agg.Rule.FedAvg, **kwargs) -> torch.nn.Module:
@@ -121,5 +180,10 @@ def federated_avg(models: Dict[Any, torch.nn.Module],
 
 def train_model(_model, train_loader, lr, wd, r, device):
     model, loss = client_update(_model, train_loader, lr, wd, r, device)
+    model_update = agg.sub_model(_model, model)
+    return model_update, model, loss
+
+def train_binary(_model, train_loader, lr, wd, r, device):
+    model, loss = client_binary(_model, train_loader, lr, wd, r, device)
     model_update = agg.sub_model(_model, model)
     return model_update, model, loss

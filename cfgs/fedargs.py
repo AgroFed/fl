@@ -2,7 +2,7 @@ import asyncio, inspect, os, sys
 from torch.utils.tensorboard import SummaryWriter
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../")))
-from libs import agg, nn, poison, resnet
+from libs import agg, fl, nn, poison, resnet
 
 argsdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
@@ -11,20 +11,34 @@ class FedArgs():
         self.num_clients = 50
         self.epochs = 50
         self.local_rounds = 1
-        self.client_batch_size = 32
-        self.test_batch_size = 128
+        self.client_batch_size = 10
+        self.test_batch_size = 10
         self.learning_rate = 1e-4
         self.weight_decay = 1e-5
         self.cuda = False
         self.seed = 1
         self.loop = asyncio.get_event_loop()
         self.agg_rule = agg.Rule.FedAvg
-        self.dataset = "mnist" # can run for mnist, f-mnist, cifar-10
+        self.dataset = "mnist" # can run for mnist, f-mnist, cifar-10, for ag_news ?
         self.labels = [label for label in range(10)] # for mnist and f-Mnist
         self.model = nn.ModelMNIST() # for mnist and f-mnist #resnet.ResNet18() for cifar - 10
+        self.train_func = fl.train_model
+        self.eval_func = fl.evaluate
         self.tb = SummaryWriter(argsdir + '/../out/runs/federated/FedAvg/mn-lfa-next-e-50', comment="Federated training")
         
 fedargs = FedArgs()
+
+class TextConfig(object):
+    embed_size = 300
+    num_channels = 100
+    kernel_size = [3,4,5]
+    output_size = 4
+    lr = 0.3
+    batch_size = 64
+    max_sen_len = 30
+    dropout_keep = 0.2
+    
+textconfig = TextConfig()
         
 # FLTrust
 FLTrust = {"is": True if fedargs.agg_rule in [agg.Rule.FLTrust, agg.Rule.FLTC] else False,
