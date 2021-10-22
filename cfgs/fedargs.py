@@ -2,7 +2,7 @@ import asyncio, inspect, os, sys
 from torch.utils.tensorboard import SummaryWriter
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../")))
-from libs import agg, fl, nn, poison, resnet
+from libs import agg, fl, nn, poison, resnet, text_utils
 
 argsdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
@@ -11,8 +11,8 @@ class FedArgs():
         self.num_clients = 50
         self.epochs = 51
         self.local_rounds = 1
-        self.client_batch_size = 10
-        self.test_batch_size = 10
+        self.client_batch_size = 32
+        self.test_batch_size = 128
         self.learning_rate = 1e-4
         self.weight_decay = 1e-5
         self.cuda = False
@@ -24,7 +24,7 @@ class FedArgs():
         self.model = nn.ModelMNIST() # for mnist and f-mnist #resnet.ResNet18() for cifar - 10
         self.train_func = fl.train_model
         self.eval_func = fl.evaluate
-        self.tb = SummaryWriter(argsdir + '/../out/runs/federated/FedAvg/mn-lfa-next-e-50', comment="Federated training")
+        self.tb = SummaryWriter(argsdir + '/../out/runs/federated/FedAvg/fl', comment="Federated training")
         
 fedargs = FedArgs()
 
