@@ -24,7 +24,7 @@ class FedArgs():
         self.model = nn.ModelMNIST() # for mnist and f-mnist #resnet.ResNet18() for cifar - 10
         self.train_func = fl.train_model
         self.eval_func = fl.evaluate
-        self.tb = SummaryWriter(argsdir + '/../out/runs/federated/FedAvg/fl', comment="Federated training")
+        self.tb = SummaryWriter(argsdir + '/../out/runs/fl/test-run', comment="fl")
         
 fedargs = FedArgs()
 
