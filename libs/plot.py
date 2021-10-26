@@ -21,6 +21,8 @@ class Plot():
     def alog(self, parent, _json):
         with open(self.file,'r+') as file:
             file_data = json.load(file)
+            if parent not in file_data[self.name][self.time]:
+                file_data[self.name][self.time][parent] = {}
             for key, value in _json.items():
                 file_data[self.name][self.time][parent][key] = value
             file.seek(0)

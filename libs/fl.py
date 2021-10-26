@@ -77,7 +77,7 @@ def client_update(_model, data_loader, learning_rate, decay, epochs, device):
         loss["Epoch " + str(epoch + 1)] = _loss.item()
     return model, loss
                     
-def evaluate(model, test_loader, device, flip_labels):
+def evaluate(model, test_loader, device, flip_labels = None):
     model.eval()
     test_output = {
         "test_loss": 0,
@@ -115,7 +115,7 @@ def evaluate(model, test_loader, device, flip_labels):
 
     return test_output
 
-def evaluate_binary(model, test_loader, device, flip_labels):
+def evaluate_binary(model, test_loader, device, flip_labels = None):
     criterion = torch.nn.BCELoss()
     size = 0
     model.eval()
