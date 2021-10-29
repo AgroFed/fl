@@ -47,7 +47,7 @@ class Distributed:
                                 if tup[0] == 'iteration' and tup[1] is not None:
                                     epoch = tup[1].decode('utf-8')
 
-                    if str(epoch) == str(_epoch):
+                    if epoch is not -1 or str(epoch) == str(_epoch):
                         model = nn.getModel(msg.value(), _model)
                         _rcvd_models[msg.key()] = copy.deepcopy(model)
             except KeyboardInterrupt:
