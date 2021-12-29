@@ -2,10 +2,9 @@ import copy, cv2, enum, heapq, os, sys, torch
 from functools import partial
 from multiprocessing import Pool, Process
 from mxnet import nd as mnd
-import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../")))
-from libs import agg, fl, sim
+from libs import agg, fl, hdc, helper, sim
 
 class Knowledge(enum.Enum):
     IN = 0
@@ -15,7 +14,7 @@ class Knowledge(enum.Enum):
 def fang_trmean(models, f, kn = Knowledge.PN):
     model_list = list(models.values())
     model_keys = list(models.keys())
-    
+
     v = []
     if kn is Knowledge.PN:
         model_list = model_list[:f]
@@ -92,6 +91,72 @@ def insert_trojan(client_data, target, func, poison_percent):
         client_data[index] = tuple(client_data[index])
 
     return list(client_data)
+
+def hdc_dp(hdc_args, flip_labels, poison_percent, hdc_client_data):
+    data = hdc_client_data[0]
+    data = list(data)
+
+    train_vectors = hdc_client_data[1]
+    proj = hdc_client_data[2]
+    proj_inv = hdc_client_data[3]
+
+    for source_label, target_label in flip_labels.items():
+        b_arr = train_vectors[target_label]
+        norm_b = sim.norm(b_arr)
+        total_occurences = len([1 for _, label in data if label == source_label])
+        poison_count = poison_percent * total_occurences
+
+        label_poisoned = 0
+        for index, _ in enumerate(data):
+            data[index] = list(data[index])
+            
+            if data[index][1] == source_label:
+                img = data[index][0].reshape(1, hdc_args["one_d_len"])
+                img_enc = sim.dot(img.detach().numpy(), proj.detach().numpy())
+                img_enc = torch.from_numpy(img_enc)
+                
+                c_arr = img_enc.reshape(hdc_args["hdc_proj_len"])
+                p_arr = copy.deepcopy(c_arr)
+
+                dot_mb = hdc_args["scale_dot"] * sim.dot(b_arr, c_arr)
+                norm_c = sim.norm(c_arr)
+                norm_m = norm_c
+                sim_mg = 1
+                
+                kwargs = {"scale_norm": hdc_args["scale_norm"]} if "scale_norm" in hdc_args else {}
+                
+                for _index in range(hdc_args["hdc_proj_len"]):
+                    p_arr, dot_mb, norm_m, sim_mg, updated = sim.cosine_coord_vector_adapter(b_arr, p_arr, _index, dot_mb, norm_m, sim_mg, c_arr, norm_c, norm_b, **kwargs)
+
+                p_arr = p_arr.reshape(1, hdc_args["hdc_proj_len"])
+                p_img = sim.dot(p_arr.detach().numpy(), proj_inv.detach().numpy())
+                p_img = torch.from_numpy(p_img)
+                p_img = p_img.view(hdc_args["view"][0], hdc_args["view"][1], hdc_args["view"][2]) #hdc_args["view"](p_img)
+
+                data[index] = [p_img, target_label]
+                label_poisoned += 1
+
+            data[index] = tuple(data[index])
+
+            if label_poisoned >= poison_count:
+                break
+
+    return tuple(data)
+
+def hdc_dp_attack(hdc_clients_data, hdc_args, flip_labels, poison_percent = 0.5):
+    torch.multiprocessing.set_sharing_strategy('file_system')
+    with Pool(len(hdc_clients_data)) as p:
+        func = partial(hdc_dp, hdc_args, flip_labels, poison_percent)
+        mal_clients_data = p.map(func, [(data, 
+                                         hdc_model.train_vectors,
+                                         hdc_model.proj,
+                                         hdc_model.proj_inv)
+                                        for client, (data, hdc_model) in hdc_clients_data.items()])
+        p.close()
+        p.join()
+        
+    return mal_clients_data
+
 
 def label_flip(data, flip_labels, poison_percent = 0.5):
     data = list(data)
@@ -175,9 +240,9 @@ def lie_attack(models, n_attackers, kn = Knowledge.PN):
     
     return models
 
-def model_poison_cosine_coord(b_arr, cosargs, c_arr):
-    poison_percent = cosargs["poison_percent"] if "poison_percent" in cosargs else 1
-    scale_dot = cosargs["scale_dot"] if "scale_dot" in cosargs else 1
+def model_poison_cosine_coord(b_arr, cos_args, c_arr):
+    poison_percent = cos_args["poison_percent"] if "poison_percent" in cos_args else 1
+    scale_dot = cos_args["scale_dot"] if "scale_dot" in cos_args else 1
 
     npd = c_arr - b_arr
     p_arr = copy.deepcopy(c_arr)
@@ -188,7 +253,7 @@ def model_poison_cosine_coord(b_arr, cosargs, c_arr):
     norm_m = norm_c
     sim_mg = 1
     
-    kwargs = {"scale_norm": cosargs["scale_norm"]} if "scale_norm" in cosargs else {}
+    kwargs = {"scale_norm": cos_args["scale_norm"]} if "scale_norm" in cos_args else {}
     
     for index in heapq.nlargest(int(len(npd) * poison_percent), range(len(npd)), npd.take):
         p_arr, dot_mb, norm_m, sim_mg, updated = sim.cosine_coord_vector_adapter(b_arr, p_arr, index, dot_mb, norm_m, sim_mg, c_arr, norm_c, norm_b, **kwargs)
