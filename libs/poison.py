@@ -2,6 +2,7 @@ import copy, cv2, enum, heapq, os, sys, torch
 from functools import partial
 from multiprocessing import Pool, Process
 from mxnet import nd as mnd
+import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../")))
 from libs import agg, fl, hdc, helper, sim
@@ -80,6 +81,7 @@ def insert_trojan(client_data, target, func, poison_percent):
         if index >= poison_count:
             break
         client_data[index] = list(client_data[index])
+
         instance = instance.squeeze().numpy()
 
         # insert trojan type
@@ -92,9 +94,47 @@ def insert_trojan(client_data, target, func, poison_percent):
 
     return list(client_data)
 
+def insert_trojan_labels(client_data, source_label, target_label, func, poison_percent = 0.5):
+    client_data = list(client_data)
+    backdoor_data = list()
+    
+    total_occurences = len([1 for _, label in client_data if label == source_label])
+    poison_count = poison_percent * total_occurences
+    if poison_percent == -1:
+        poison_count = total_occurences
+
+    label_poisoned = 0
+    for index, (instance, label) in enumerate(client_data):
+        client_data[index] = list(client_data[index])
+        if label == source_label:
+            
+            for _index in range(instance.shape[0]):
+                temp = instance[_index].squeeze().numpy()
+                #instance = instance.squeeze().numpy()
+
+                temp = func(temp)
+                # insert trojan type
+                #instance = func(instance)
+                
+                instance[_index] = torch.Tensor(temp).unsqueeze(0)
+
+            client_data[index][0] = instance #torch.Tensor(instance).unsqueeze(0)
+            client_data[index][1] = target_label
+            backdoor_data.append(tuple(client_data[index]))
+
+        client_data[index] = tuple(client_data[index])
+        if label_poisoned >= poison_count:
+            break
+
+    if poison_percent == -1:
+        return tuple(backdoor_data)
+
+    return tuple(client_data)
+
 def hdc_dp(hdc_args, flip_labels, poison_percent, hdc_client_data):
     data = hdc_client_data[0]
     data = list(data)
+    mal_data = list()
 
     train_vectors = hdc_client_data[1]
     proj = hdc_client_data[2]
@@ -105,6 +145,8 @@ def hdc_dp(hdc_args, flip_labels, poison_percent, hdc_client_data):
         norm_b = sim.norm(b_arr)
         total_occurences = len([1 for _, label in data if label == source_label])
         poison_count = poison_percent * total_occurences
+        if poison_percent == -1:
+            poison_count = total_occurences
 
         label_poisoned = 0
         for index, _ in enumerate(data):
@@ -124,16 +166,18 @@ def hdc_dp(hdc_args, flip_labels, poison_percent, hdc_client_data):
                 sim_mg = 1
                 
                 kwargs = {"scale_norm": hdc_args["scale_norm"]} if "scale_norm" in hdc_args else {}
-                
-                for _index in range(hdc_args["hdc_proj_len"]):
+
+                for _index in range(3500):
                     p_arr, dot_mb, norm_m, sim_mg, updated = sim.cosine_coord_vector_adapter(b_arr, p_arr, _index, dot_mb, norm_m, sim_mg, c_arr, norm_c, norm_b, **kwargs)
 
-                p_arr = p_arr.reshape(1, hdc_args["hdc_proj_len"])
-                p_img = sim.dot(p_arr.detach().numpy(), proj_inv.detach().numpy())
-                p_img = torch.from_numpy(p_img)
-                p_img = p_img.view(hdc_args["view"][0], hdc_args["view"][1], hdc_args["view"][2]) #hdc_args["view"](p_img)
+                    if _index > 3470:
+                        _p_arr = p_arr.reshape(1, hdc_args["hdc_proj_len"])
+                        p_img = sim.dot(_p_arr.detach().numpy(), proj_inv.detach().numpy())
+                        p_img = torch.from_numpy(p_img)
+                        p_img = p_img.view(hdc_args["view"][0], hdc_args["view"][1], hdc_args["view"][2])
+                        mal_data.append(tuple([p_img, target_label]))
 
-                data[index] = [p_img, target_label]
+                #data[index] = [p_img, target_label]
                 label_poisoned += 1
 
             data[index] = tuple(data[index])
@@ -141,6 +185,10 @@ def hdc_dp(hdc_args, flip_labels, poison_percent, hdc_client_data):
             if label_poisoned >= poison_count:
                 break
 
+    if poison_percent == -1:
+        return tuple(mal_data)        
+
+    data = data + mal_data
     return tuple(data)
 
 def hdc_dp_attack(hdc_clients_data, hdc_args, flip_labels, poison_percent = 0.5):
@@ -156,7 +204,6 @@ def hdc_dp_attack(hdc_clients_data, hdc_args, flip_labels, poison_percent = 0.5)
         p.join()
         
     return mal_clients_data
-
 
 def label_flip(data, flip_labels, poison_percent = 0.5):
     data = list(data)
