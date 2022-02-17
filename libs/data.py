@@ -3,6 +3,7 @@ import os.path
 from sklearn.model_selection import train_test_split
 import pandas as pd
 import numpy as np
+from PIL import Image
 
 import torch
 import torch.autograd as autograd
@@ -72,14 +73,46 @@ class AGNEWs(Dataset):
         num_class = [self.label.count(c) for c in label_set]
         class_weight = [num_samples/float(self.label.count(c)) for c in label_set]    
         return class_weight, num_class
+    
+class CelebaDataset(Dataset):
+    """Custom Dataset for loading CelebA face images"""
+
+    def __init__(self, csv_path, img_dir, transform=None):
+    
+        df = pd.read_csv(csv_path, index_col=0)
+        self.img_dir = img_dir
+        self.csv_path = csv_path
+        self.img_names = df.index.values
+        self.y = df['Male'].values
+        self.transform = transform
+
+    def __getitem__(self, index):
+        img = Image.open(os.path.join(self.img_dir,
+                                      self.img_names[index]))
+        
+        if self.transform is not None:
+            img = self.transform(img)
+        
+        label = self.y[index]
+        return img, label
+
+    def __len__(self):
+        return self.y.shape[0]
 
 def load_dataset(dataset, only_to_tensor = False):
     if only_to_tensor:
-        transform=transforms.ToTensor()
+        transform=transforms.ToTensor() 
     elif dataset.upper() == "MNIST" or dataset.upper() == "FMNIST":
         transform = transforms.Compose([
                         transforms.ToTensor(),
                         transforms.Normalize((0.1307,), (0.3081,))
+                    ])
+    elif dataset.upper() == "CELEBA":
+        transform = transforms.Compose([transforms.CenterCrop((178, 178)),
+                        transforms.Resize((128, 128)),
+                        #transforms.Grayscale(),                                       
+                        #transforms.Lambda(lambda x: x/255.),
+                        transforms.ToTensor()
                     ])
     else:
         transform=transforms.ToTensor()
@@ -99,6 +132,48 @@ def load_dataset(dataset, only_to_tensor = False):
     if dataset.upper() == "FMNIST":
         train_data = datasets.FashionMNIST(root=datadir, train=True, transform=transform, download=True)
         test_data = datasets.FashionMNIST(root=datadir, train=False, transform=transform, download=True)
+
+    if dataset.upper() == "CELEBA":
+        # 1. Download this file into dataset_directory:
+        #  https://www.kaggle.com/jessicali9530/celeba-dataset
+        # 2. Put the `img_align_celeba` directory into the `celeba` directory!
+        # 3. Dataset directory structure should look like this (required by ImageFolder from torchvision):
+        #  +- `dataset_directory`
+        #     +- celeba
+        #        +- img_align_celeba
+        #           +- 000001.jpg
+        #           +- 000002.jpg
+        #           +- 000003.jpg
+        #           +- ...
+        
+        df1 = pd.read_csv(datadir + '/celeba/list_attr_celeba.txt', sep="\s+", skiprows=1, usecols=['Male'])
+
+        # Make 0 (female) & 1 (male) labels instead of -1 & 1
+        df1.loc[df1['Male'] == -1, 'Male'] = 0
+        
+        df2 = pd.read_csv(datadir + '/celeba/list_eval_partition.txt', sep="\s+", skiprows=0, header=None)
+        df2.columns = ['Filename', 'Partition']
+        df2 = df2.set_index('Filename')
+        
+        df3 = df1.merge(df2, left_index=True, right_index=True)
+        df3.to_csv(datadir + '/celeba/celeba-gender-partitions.csv')
+        df4 = pd.read_csv(datadir + '/celeba/celeba-gender-partitions.csv', index_col=0)
+        
+        df4.loc[df4['Partition'] == 0].to_csv(datadir + '/celeba/celeba-gender-train.csv')
+        df4.loc[df4['Partition'] == 1].to_csv(datadir + '/celeba/celeba-gender-valid.csv')
+        df4.loc[df4['Partition'] == 2].to_csv(datadir + '/celeba/celeba-gender-test.csv')
+        
+        train_data = CelebaDataset(csv_path=datadir + '/celeba/celeba-gender-train.csv',
+                              img_dir=datadir + '/celeba/img_align_celeba/',
+                              transform=transform)
+
+        valid_data = CelebaDataset(csv_path=datadir + '/celeba/celeba-gender-valid.csv',
+                                      img_dir=datadir + '/celeba/img_align_celeba/',
+                                      transform=transform)
+
+        test_data = CelebaDataset(csv_path=datadir + '/celeba/celeba-gender-test.csv',
+                                     img_dir=datadir + '/celeba/img_align_celeba/',
+                                     transform=transform)
         
     if dataset.upper() == "CIFAR10":
         transform_train = transforms.Compose([
