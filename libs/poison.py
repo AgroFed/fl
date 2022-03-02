@@ -167,14 +167,17 @@ def hdc_dp(hdc_args, flip_labels, poison_percent, hdc_client_data):
                 
                 kwargs = {"scale_norm": hdc_args["scale_norm"]} if "scale_norm" in hdc_args else {}
 
-                for _index in range(3500):
+                for _index in range(3410):
                     p_arr, dot_mb, norm_m, sim_mg, updated = sim.cosine_coord_vector_adapter(b_arr, p_arr, _index, dot_mb, norm_m, sim_mg, c_arr, norm_c, norm_b, **kwargs)
 
-                    if _index > 3470:
+                    if _index > 3400:
                         _p_arr = p_arr.reshape(1, hdc_args["hdc_proj_len"])
                         p_img = sim.dot(_p_arr.detach().numpy(), proj_inv.detach().numpy())
                         p_img = torch.from_numpy(p_img)
                         p_img = p_img.view(hdc_args["view"][0], hdc_args["view"][1], hdc_args["view"][2])
+                        #print("Shapes", data[index][0].shape, p_img.shape)
+                        print("Simily", sim.cosine_similarity(data[index][0].view(-1), p_img.view(-1)))
+                        #if sim.cosine_similarity(data[index][0].view(-1), p_img.view(-1)) > 0.999:
                         mal_data.append(tuple([p_img, target_label]))
 
                 #data[index] = [p_img, target_label]

@@ -17,7 +17,10 @@ from cfgs.fedargs import *
 
 
 project = 'fl-hdc-dp'
-name = 'Median-fmnist-hdc'
+name = 'Median-fmnist-hdc-40'
+
+# No of malicious clients
+mal_clients = [c for c in range(40)]
 
 hdc_dp_attack["is"] = True
 set_lfa_labels({4: 6})

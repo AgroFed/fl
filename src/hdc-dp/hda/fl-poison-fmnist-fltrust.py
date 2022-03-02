@@ -17,7 +17,7 @@ from cfgs.fedargs import *
 
 
 project = 'fl-hdc-dp'
-name = 'Krum-fmnist-hdc-40'
+name = 'FLTrust-fmnist-hdc-40'
 
 # No of malicious clients
 mal_clients = [c for c in range(40)]
@@ -30,7 +30,8 @@ log.init("info")
 #log.init("info", name)
 #log.init("debug", name)
 
-fedargs.agg_rule = agg.Rule.Krum
+FLTrust["is"] = True
+fedargs.agg_rule = agg.Rule.FLTrust
 fedargs.dataset = "fmnist"
 fedargs.tb = SummaryWriter('../../../out/runs/' + project + '/' + name, comment="fl")
 data_dict = {'epochs':[],'acc': [], 'test_loss': [], 'asr': [],'msr':[]}

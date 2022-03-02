@@ -17,10 +17,10 @@ from cfgs.fedargs import *
 
 
 project = 'fl-hdc-dp'
-name = 'Krum-fmnist-hdc-40'
+name = 'FedAvg-cifar-hdc-20'
 
 # No of malicious clients
-mal_clients = [c for c in range(40)]
+mal_clients = [c for c in range(20)]
 
 hdc_dp_attack["is"] = True
 set_lfa_labels({4: 6})
@@ -30,8 +30,13 @@ log.init("info")
 #log.init("info", name)
 #log.init("debug", name)
 
-fedargs.agg_rule = agg.Rule.Krum
-fedargs.dataset = "fmnist"
+fedargs.agg_rule = agg.Rule.FedAvg
+fedargs.dataset = "cifar10"
+fedargs.model = resnet.ResNet18()
+fedargs.view = [3, 32, 32]
+fedargs.one_d_len = 3072
+hdc_dp_attack["args"]["view"] = fedargs.view
+hdc_dp_attack["args"]["one_d_len"] = fedargs.one_d_len
 fedargs.tb = SummaryWriter('../../../out/runs/' + project + '/' + name, comment="fl")
 data_dict = {'epochs':[],'acc': [], 'test_loss': [], 'asr': [],'msr':[]}
 ltbl = ltbl.init(data_dict, name, project)
