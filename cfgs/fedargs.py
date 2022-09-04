@@ -125,7 +125,7 @@ lie_attack = {"is": False,
 
 # SOTA attack proposed for trimmed mean, min-max, min-sum
 sota_attack = {"is": False,
-               "kn": poison.Knowledge.PN,
+               "kn": poison.Knowledge.FN,
                "dev_type": "unit_vec", # see other possible functions in poison python file
                "func": poison.sota_agnostic_min_max # see other possible functions in poison python file
                }
@@ -135,5 +135,5 @@ sybil_attack = {"is": False}
 
 # Backdoor
 shap_explain = {"is": False,
-                "trim_labels": [0, 4],
+                "trim_labels": [4],
                 "trim_data": inference.trim_data}

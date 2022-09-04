@@ -1,4 +1,4 @@
-import csv, inspect, json
+import csv, inspect, json, os
 import os.path
 from sklearn.model_selection import train_test_split
 import pandas as pd
@@ -132,7 +132,16 @@ def load_dataset(dataset, only_to_tensor = False):
     if dataset.upper() == "FMNIST":
         train_data = datasets.FashionMNIST(root=datadir, train=True, transform=transform, download=True)
         test_data = datasets.FashionMNIST(root=datadir, train=False, transform=transform, download=True)
+        
+    if dataset.upper() == "MEDNIST":
+        resource = "https://github.com/Project-MONAI/MONAI-extra-test-data/releases/download/0.8.1/MedNIST.tar.gz"
 
+        compressed_file = os.path.join(datadir, "MedNIST.tar.gz")
+        data_dir = os.path.join(datadir, "MedNIST")
+        if not os.path.exists(data_dir):
+            os.chdir(data_dir)
+            os.system("wget -c https://github.com/Project-MONAI/MONAI-extra-test-data/releases/download/0.8.1/MedNIST.tar.gz -0 - | tar -xzvf")
+        
     if dataset.upper() == "CELEBA":
         # 1. Download this file into dataset_directory:
         #  https://www.kaggle.com/jessicali9530/celeba-dataset

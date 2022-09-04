@@ -20,7 +20,7 @@ def audit_attack(target, pred, flip_labels, attack_dict):
                     if pred[i].item() == flip_labels[target[i].item()]:
                         attack_dict["attack_success_count"] += 1
 
-def backdoor_test(model, backdoor_test_loader, device, source_label):
+def backdoor_test(model, backdoor_test_loader, device, target_label):
     model.eval()
     test_output = {
         "test_loss": 0,
@@ -37,10 +37,10 @@ def backdoor_test(model, backdoor_test_loader, device, source_label):
             test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             for i in range(len(pred)):
-                if pred[i] != source_label:
-                    misclass += 1
-                    if pred[i] == target[i]:
-                        correct += 1
+                if pred[i] == target_label:
+                    misclass += 1   
+                if pred[i] == target[i]:
+                    correct += 1
 
     test_output["test_loss"] /= len(backdoor_test_loader.dataset)
     test_output["accuracy"] = (correct / len(backdoor_test_loader.dataset)) * 100
@@ -76,7 +76,9 @@ def client_update(_model, data_loader, learning_rate, decay, epochs, device):
             data, target = data.to(device), target.to(device)
             optimizer.zero_grad()
             output = model(data)
-            _loss = F.nll_loss(output.log(), target)
+            #_loss = F.nll_loss(output.log(), target)
+            #_loss = F.nll_loss(output, target)
+            _loss = F.cross_entropy(output, target)
             _loss.backward()
             optimizer.step()
 
